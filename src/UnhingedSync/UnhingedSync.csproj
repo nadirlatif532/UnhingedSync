@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>UnhingedSync</AssemblyName>
+    <RootNamespace>UnhingedSync</RootNamespace>
+    <ApplicationTitle>Unhinged Sync</ApplicationTitle>
+
+    <!-- Artists must not need a .NET install: publish one self-contained exe. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- Shown in the UI and used to name the extracted script cache, so a stale copy
+         of the app is visible rather than mysterious. Bump on release. -->
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <!-- The scripts travel INSIDE the exe. That makes the zip a single file, and makes it
+       impossible to run a script from one version against an exe from another - which is
+       exactly the class of bug that wasted an afternoon. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\scripts\Invoke-UnhingedBuild.ps1" LogicalName="scripts/Invoke-UnhingedBuild.ps1" />
+    <EmbeddedResource Include="..\..\scripts\Test-EngineIntegrity.ps1" LogicalName="scripts/Test-EngineIntegrity.ps1" />
+    <EmbeddedResource Include="..\..\scripts\Setup-Syncthing.ps1" LogicalName="scripts/Setup-Syncthing.ps1" />
+    <EmbeddedResource Include="..\..\scripts\Setup-Syncthing.bat" LogicalName="scripts/Setup-Syncthing.bat" />
+    <EmbeddedResource Include="..\..\scripts\Reset-Ftue.ps1" LogicalName="scripts/Reset-Ftue.ps1" />
+  </ItemGroup>
+
+</Project>

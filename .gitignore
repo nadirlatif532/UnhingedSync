@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+dist/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userprefs
+
+# Published output, if anyone points -OutputDir here
+App/
+*.zip
+
+# OS
+Thumbs.db
+.DS_Store
