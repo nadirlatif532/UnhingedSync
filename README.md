@@ -16,8 +16,9 @@ Requires **Diversion** for version control, and **Windows**. See *Limits* at the
    it needs are inside it. Nothing to install for the app itself.
 2. Install and sign in to **Diversion**, and sync the project.
 3. Install the **Unreal Engine** version the project uses (Epic Games Launcher).
-4. Run `UnhingedSync.exe`. It asks for your project folder and where to keep the shared
-   binaries, then remembers both.
+4. Run `UnhingedSync.exe` and point it at your project folder — the one containing the
+   `.uproject`. That's the only question it asks. Binaries go in `%USERPROFILE%\UnhingedShare`
+   unless you set `UNHINGEDSYNC_PUBLISH_ROOT`.
 5. Open **Sharing…**, copy your device ID, send it to whoever runs the share. When they
    add you, accept their request in the same window and answer **yes** to *"is this your
    team's hub?"*.
@@ -211,16 +212,28 @@ first. Mismatched copies of the tool are the single most likely explanation.
 ## Packaging a new version
 
 ```bash
-pwsh -File Publish-UnhingedSync.ps1
+dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
+Compress-Archive -Path dist/UnhingedSync.exe -DestinationPath UnhingedSync.zip -Force
 ```
 
-Produces one folder with `UnhingedSync.exe` and a short README. The scripts are compiled
-**into** the exe, so a script can never run against a different build — bump `<Version>` in
-`UnhingedSync.csproj` when you release, since the version also keys the script cache.
+That's the whole thing. `dist/UnhingedSync.exe` is self-contained — the .NET runtime and
+every script are inside it — so the zip is one file and there is nothing to keep together.
 
-By default it publishes to `<publish root>\App`, so the tool distributes itself alongside
-the binaries and everyone picks up updates. It stages to temp first, so a failed publish
-never leaves the team with a half-written exe.
+Bump `<Version>` in `UnhingedSync.csproj` when you release. It shows in the app's top-right
+corner and keys the extracted script cache, so a teammate running an old copy is visible
+rather than mysterious.
+
+There used to be a wrapper script here. It resolved an output folder from per-machine
+config, staged to temp, and deleted a 67 KB `.pdb` — ceremony around one `dotnet publish`,
+and its guessed output folder was the most confusing thing in the repo. If you want the
+tool to distribute itself, publish straight into the share instead:
+
+```bash
+dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o "<publish root>/App"
+```
+
+Prefer publishing to `dist` and copying in if peers are actively syncing that folder — a
+61 MB exe written in place is visible to Syncthing mid-write.
 
 ## Repository layout
 

@@ -290,7 +290,15 @@ public static class ConfigLoader
                 return candidate;
         }
 
-        return config.PublishRootDefault;
+        if (!string.IsNullOrWhiteSpace(config.PublishRootDefault)) return config.PublishRootDefault;
+
+        // A working default rather than a question. Where the binaries land is not a
+        // decision a new teammate can make well on their first run, and the one genuinely
+        // wrong answer -- inside the project, where 'dv clean' deletes ignored files -- is
+        // exactly the one they might pick by accident. Visible and obviously named, so it
+        // can be found again when pointing Syncthing at it.
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "UnhingedShare");
     }
 
     private static LocalOverrides? ReadLocalOverrides()

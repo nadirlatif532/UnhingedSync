@@ -98,67 +98,32 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Asks once where this machine should keep the shared binaries, then remembers it
-    /// per machine. There is no sensible default to fall back on -- the tool is portable
-    /// and every teammate's drives are laid out differently.
+    /// Settles where this machine keeps the shared binaries, without asking.
+    ///
+    /// This used to be the second question of a first run, which is a poor question to put
+    /// to someone who has just unzipped the tool: they have no basis to answer, and the one
+    /// genuinely harmful answer -- inside the project, where 'dv clean' deletes ignored
+    /// files -- is exactly the one they might pick by accident. A default is chosen and
+    /// persisted instead, which also means the Syncthing setup script finds a location in
+    /// config.local.json rather than failing for want of one. Override by editing that file
+    /// or setting UNHINGEDSYNC_PUBLISH_ROOT.
     /// </summary>
     private static bool EnsurePublishRoot()
     {
-        var config = ConfigLoader.Load();
-        if (!string.IsNullOrWhiteSpace(config.PublishRoot)) return true;
-
-        var prompt = MessageBox.Show(
-            "Where should the shared binaries live on this machine?\n\n" +
-            "This is the folder Syncthing replicates — builds arrive here and are " +
-            "installed into the project from it. Roughly 100 MB for ten builds.\n\n" +
-            "Pick a folder now?",
-            "Choose a location for the binaries",
-            MessageBoxButton.OKCancel, MessageBoxImage.Information);
-        if (prompt != MessageBoxResult.OK) return false;
-
-        while (true)
+        try
         {
-            var dialog = new OpenFolderDialog
-            {
-                Title = "Where should the shared binaries be stored?",
-                Multiselect = false
-            };
-            if (dialog.ShowDialog() != true) return false;
-
-            var chosen = Path.GetFullPath(dialog.FolderName);
-
-            // Inside the project it would sit in the Diversion workspace, where a
-            // 'dv clean' deletes ignored files -- the share would vanish silently.
-            var projectRoot = Path.GetFullPath(config.ProjectRoot)
-                .TrimEnd(Path.DirectorySeparatorChar);
-            if (chosen.Equals(projectRoot, StringComparison.OrdinalIgnoreCase) ||
-                chosen.StartsWith(projectRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            {
-                var again = MessageBox.Show(
-                    $"That folder is inside the project:\n\n{chosen}\n\n" +
-                    "Don't put the share there. It would live in the Diversion workspace, " +
-                    "and 'dv clean' removes ignored files — it would be deleted without " +
-                    "warning, along with every build in it.\n\nPick somewhere else?",
-                    "Not inside the project",
-                    MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-                if (again != MessageBoxResult.OK) return false;
-                continue;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(chosen);
-                ConfigLoader.PersistPublishRoot(chosen);
-                return true;
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                var again = MessageBox.Show(
-                    $"Could not use that folder:\n\n{e.Message}\n\nPick another?",
-                    "Folder not usable",
-                    MessageBoxButton.OKCancel, MessageBoxImage.Warning);
-                if (again != MessageBoxResult.OK) return false;
-            }
+            var config = ConfigLoader.Load();
+            Directory.CreateDirectory(config.PublishRoot);
+            ConfigLoader.PersistPublishRoot(config.PublishRoot);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(
+                $"Could not create the folder for shared binaries:\n\n{e.Message}\n\n" +
+                "Set UNHINGEDSYNC_PUBLISH_ROOT to a writable folder and try again.",
+                "Cannot reach the binaries folder", MessageBoxButton.OK, MessageBoxImage.Error);
+            return false;
         }
     }
 }
