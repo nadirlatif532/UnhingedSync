@@ -22,6 +22,16 @@ public partial class App : Application
             return;
         }
 
+        // Builds every window so the ControlTemplates are applied, not merely parsed.
+        if (e.Args.Any(a => a.Equals("--uitest", StringComparison.OrdinalIgnoreCase)))
+        {
+            var uiPath = e.Args.SkipWhile(a => !a.Equals("--uitest", StringComparison.OrdinalIgnoreCase))
+                               .Skip(1)
+                               .FirstOrDefault();
+            Shutdown(await UiTest.RunAsync(uiPath));
+            return;
+        }
+
         if (e.Args.Any(a => a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase)))
         {
             var path = e.Args.SkipWhile(a => !a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase))
