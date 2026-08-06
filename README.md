@@ -4,347 +4,138 @@ Unhinged Sync distributes compiled Unreal editor binaries to a team, so that nob
 Visual Studio installed just to open the project. You sync the latest commit, the tool
 fetches the matching binaries, and you open the editor. One button does all of it.
 
-It works on **any** Unreal project. Point it at a folder containing a `.uproject` and it
-configures itself.
+It works on **any** Unreal project. Point it at a folder containing a `.uproject`.
 
 ## The problem this solves
 
-On a C++ Unreal project, the editor will not open until the project's C++ has been
-compiled for the exact commit you are on. That normally means every artist, designer and
-animator needs Visual Studio, a working toolchain, and 20 to 40 minutes whenever a
-programmer touches code.
+On a C++ Unreal project the editor will not open until the project's C++ has been compiled
+for the exact commit you are on. That normally means every artist, designer and animator
+needs Visual Studio, a working toolchain, and twenty to forty minutes whenever a programmer
+touches code.
 
 Unhinged Sync makes compiling one person's job. Anyone with a toolchain can build a commit
-and publish the result. Everyone else downloads it in a few seconds. A build is roughly
-10 MB, so keeping the last ten builds costs about 100 MB of disk.
-
-There is no build server and nothing to host. The binaries travel over
-[Syncthing](https://syncthing.net), which is free, open source, peer to peer, and needs no
-account.
+and publish it. Everyone else downloads it in a few seconds. A build is roughly 10 MB.
 
 ## How it works
 
-1. A programmer presses **Build Locally**. It compiles the current commit and publishes a zip
-   into a shared folder.
-2. Syncthing replicates that folder to everyone on the team.
-3. Everyone else presses **Sync & Ensure Binaries**. Binaries already exist, so the tool
-   installs them and never compiles anything.
+1. Someone with a C++ toolchain presses **Build Locally**. It compiles the current commit
+   and uploads the result to a bucket.
+2. Everyone else presses **Sync & Ensure Binaries**. It pulls the latest commit and installs
+   the matching binaries.
+3. Nobody waits on anybody's machine being switched on.
 
-The shared folder is the only moving part. There is no database and no server.
+Builds live in a Cloudflare R2 bucket, which is S3 compatible. There is no server to run, no
+pairing, no peer to peer setup, and no machine that has to stay online. R2 charges nothing
+for egress, and distribution is the whole workload here, so a team of thirty fits inside the
+free tier with room to spare.
 
 ## Requirements
 
 | | |
 |---|---|
-| Windows | Paths, engine lookup and the startup shortcut are all Windows specific. |
+| Windows | Paths and the engine lookup are Windows specific. |
 | [Diversion](https://www.diversion.dev) | Version control. Commit identity comes from `dv`. |
 | Unreal Engine | Installed via the Epic Games Launcher, matching the version the project targets. |
-| PowerShell 7 | Only needed to **build** or to run Syncthing setup. Not needed to download binaries. The app offers to install it for you. |
-| Visual Studio with "Game development with C++" | Only needed to build. Artists do not need it. |
+| PowerShell 7 | Only needed to **build**. Not needed to download binaries. The app offers to install it. |
+| Visual Studio with "Game development with C++" | Only needed to build. |
 
-Windows PowerShell 5.1, the version preinstalled on Windows, is **not** sufficient for
-building. The scripts refuse to run under it rather than failing halfway through.
+Windows PowerShell 5.1, the version preinstalled on Windows, cannot run the build scripts.
+They refuse to start under it rather than failing halfway through a compile.
 
 ## Setup
 
 ### If someone sent you the zip
-This assumes you already have Diversion running with the correct engine version. 
 
-1. Unzip anywhere. It is a single `UnhingedSync.exe`. The .NET runtime and every script it
-   needs are inside it, so there is nothing to install for the app itself.
-2. Run `UnhingedSync.exe`. It asks one question: where your project folder is, meaning the
-   folder that contains the `.uproject`.
-3. Open **Sharing...** and click "Run Syncthing Setup" and choose appropriate role. 
-4. Once that is done: put your own name in **How you appear to others**, then press
-   **Rename**. Syncthing defaults this to your computer name, and a peer list full of
-   entries like `DESKTOP-4B7QK2` tells nobody who is who.
-5. Copy your device ID and send it to whoever runs the share. When they add you, come back
-   to this window, accept their request, and answer **yes** to *"is this your team's hub?"*.
-6. Press **Sync & Ensure Binaries**.
+1. Unzip anywhere. It is a single `UnhingedSync.exe` with the .NET runtime and every script
+   inside it, so there is nothing to install for the app itself.
+2. Install [Diversion](https://www.diversion.dev), sign in, and **sync the project**. This
+   matters: the project carries the configuration that tells the app where builds live.
+3. Install the Unreal Engine version the project uses.
+4. Run `UnhingedSync.exe` and point it at your project folder, the one containing the
+   `.uproject`. That is the only question it asks.
+5. Press **Sync & Ensure Binaries**.
 
-Steps 1 to 5 happen once per machine. Step 6 is the daily routine.
+That is the whole thing. There is no pairing step, no device ID to exchange, and nothing to
+configure per machine. If you are going to compile, also say yes when the app offers to
+install PowerShell 7.
 
-If you are going to compile, also say yes when the app offers to install PowerShell 7.
+If step 4 warns that a configuration was generated, the project has not finished syncing.
+Wait for Diversion, delete the generated `Tools/unhingedsync.json`, and reopen.
 
 ### If you are setting the team up
 
-Someone has to publish the first build and act as the hub that everyone else pairs with.
-That machine should be a programmer's machine or a dedicated build box.
+You need a bucket and a token once, then the whole team is configured by version control.
 
-1. Do the six steps above, choosing **Programmer** or **Dedicated build machine** as the
-   role in step 3.
-2. Press **Build Locally** to compile and publish the first build. **Sync & Ensure Binaries**
-   deliberately will not do this for you, for the reason in *Daily usage* below.
-3. Press **Offer the folder to every peer** whenever somebody new joins. There is nothing to
-   switch on to "become" the hub, and the reason is explained below.
-5. Commit `Tools/unhingedsync.json` to Diversion. This is important: it is how the whole
-   team agrees on the editor target and, critically, on the Syncthing folder ID.
-6. Send teammates the zip and your device ID.
-
-### Onboarding 20 to 30 people: use a hub
-
-Syncthing pairing is mutual, so a full mesh of 30 people means 435 separate pairings. That
-does not scale, so **one machine acts as the hub**, ideally two for redundancy.
-
-Everyone pairs with the hub and ticks *"this machine is the team's hub"*. Syncthing's
-introducer mechanism then tells them about everyone else automatically. That is 30 pairings
-instead of 435, and a new joiner only ever exchanges IDs with one person.
-
-The direction is easy to get backwards, so to be explicit: marking a device as introducer
-**on your machine** means *you* accept the devices *they* introduce. Spokes mark the hub.
-The hub itself needs no flag.
-
-Ticking that box also lets the hub offer you new folders, which is why only machines set up
-as programmer or build host are allowed to tick it. Everything stays peer to peer. The hub
-is only an address book, and once you have been introduced you sync builds directly with
-everyone else even when the hub is offline.
-
-### Managing hubs
-
-The **Sharing...** window lists every peer, shows which of them are hubs, and gives each one
-a **Make hub** or **Not a hub** button. Only a programmer or build host can use those,
-because promoting a peer means auto-accepting the devices it introduces and letting it
-create folders on your disk.
-
-**There is nothing to switch on to become the hub, and that is not an omission.** Syncthing
-has no "I am a hub" flag. The introducer bit lives on every *other* machine, so you become
-the hub the moment teammates tick *"they are our hub"* against your device ID. Nothing you
-can set locally affects that, so the app does not pretend otherwise.
-
-There is one duty that genuinely is the hub owner's, and it has a button: **Offer the folder
-to every peer**. A device introduced by a hub is added to your device list *without* being
-offered any folder, so it looks correctly paired and receives nothing at all. Press this
-whenever somebody new joins.
-
-Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
-joiners have nobody to pair with until someone else is promoted.
-
-## Daily usage
-
-**Sync & Ensure Binaries** is the whole job:
-
-1. Pulls the latest commit from Diversion.
-2. Looks for published binaries matching that commit and your engine.
-3. If found, installs them. It never installs mismatched binaries.
-4. If not found, it stops and tells you why, including how far along your copy of the share
-   is. It does **not** compile.
-
-**It will never build for you, and that is deliberate.** Compiling on a miss makes this
-button succeed no matter what state the share is in, which hides the failure that actually
-matters. A thirty minute compile that ends in a working editor looks like success, so a share
-that is not replicating goes unnoticed until it reaches somebody who cannot compile at all.
-
-So when binaries are missing you get a dialog naming the likely cause. If your share is below
-100% the binaries have probably just not arrived yet, and waiting is the fix. If it is fully
-synced and this commit genuinely has not been published, press **Build Locally**.
-
-If someone else is already building that commit you are told, rather than duplicating 30
-minutes of work. Claims are best effort hints, because replication latency makes real
-locking impossible, so a duplicate build is possible and harmless.
-
-### The other buttons
-
-| Button | What it does |
-|---|---|
-| **Refresh** | Re-reads Diversion and the shared folder. |
-| **Sharing...** | Syncthing pairing: your device ID, your display name, inviting teammates, accepting requests, and managing hubs. |
-| **Manage Binaries...** | See every published build and free up disk space. |
-| **Fetch Selected** | Installs a specific commit's binaries. Warns first if it does not match your workspace. |
-| **Build Locally** | Compiles here instead of downloading. This is how you get debuggable symbols. |
-| **Build Log** | Opens the published compiler output for the selected commit. This is how you find out why a red badge is red. |
-| **Copy Diagnostics** | Copies version, engine, paths and recent log to the clipboard. Paste this when reporting a problem. |
-| **Open Editor** | Launches the project. |
-| **Check for updates** | Asks GitHub for a newer release now. |
-
-### Reading the commit list
-
-| Badge | Meaning |
-|---|---|
-| Green dot | Binaries published and ready to install |
-| Blue triangle | Someone is building this commit right now |
-| Amber part-circle | Still replicating to your machine |
-| Red cross | The build failed. Open the Build Log |
-| Grey circle | Expired, meaning retention removed the zip |
-| Plain dash | Nobody has built this commit |
-
-In the left column, a triangle marks your workspace commit and a tick marks the binaries
-you currently have installed.
-
-### Why the version banner matters
-
-If the banner says your binaries and your workspace disagree, **do not open the editor**.
-
-Mismatched C++ and content is the one failure here that can actually lose work. If a
-`UPROPERTY` changed between the two commits, assets serialised against the newer code can
-silently drop data when they are resaved. Everything else fails safely, and the worst case
-is that you compile locally, which is where you started.
-
-## Roles
-
-The Syncthing setup asks what kind of machine this is. The choice sets how the shared
-folder behaves.
-
-| Role | Folder type | Can publish | Notes |
-|---|---|---|---|
-| Artist or designer | receive only | No | Receives builds. Pick this if you do not compile C++. |
-| Programmer | send and receive | Yes | Can build and publish for the team. |
-| Dedicated build machine | send and receive | Yes | Also lets the build script sync the workspace unattended. Only for a machine nobody works in. |
-
-The role is recorded per machine and is not committed. It affects two things beyond
-publishing: only programmers and build hosts may grant introducer trust, and only they can
-delete shared builds.
-
-## Managing disk space
-
-Builds accumulate. Two things clean them up.
-
-**Automatically.** After every successful publish, retention keeps the newest
-`retainBuilds` builds (ten by default) and deletes the older zips. Their rows become grey
-"expired" entries.
-
-**On demand.** **Manage Binaries...** lists every build with its size, and lets you delete
-specific ones or keep only the newest few.
-
-One thing to understand before using it: the shared folder is replicated, so **deleting a
-build there removes it for the whole team**, not just for you. Anyone who still needs that
-commit would have to compile it again. The window states this before it deletes anything,
-and it warns you if you are about to delete the build you currently have installed or one
-that somebody is building right now.
-
-On an artist machine the delete controls are **disabled**, and this is deliberate rather
-than an oversight. A receive only folder does not send local deletions to anyone, so
-deleting there would free space on that one machine, leave the folder permanently flagged
-as out of sync, and offer a Revert button that downloads everything straight back. Ask a
-programmer or the build host to clean up instead.
-
-## Keeping the tool updated
-
-The app checks GitHub for a newer release when it starts, at most once every four hours. If
-one exists you are offered a one click update: it downloads in the background, swaps the
-executable, and restarts. **Check for updates** does the same on demand and also tells you
-when you are already current.
-
-If you decline a version you will not be asked about it again, but you will be offered the
-next one. Use **Check for updates** if you change your mind.
-
-A copy of the tool running from inside the shared folder does not self update, because
-Syncthing already distributes the new executable there. Whoever publishes the tool updates
-that copy.
-
-If a teammate reports behaviour you do not see, **compare the version in the top right
-corner first**. Mismatched copies of the tool are the single most likely explanation.
-
-## PDBs are never published
-
-Measured on a real project: the binaries zip is 9.5 MB and the symbols are 780 MB.
-Replication sends everything to every subscriber, so publishing PDBs would cost every
-artist roughly 8 GB for a debugger they never open.
-
-So they are not published. Not by default, not on request, not behind a flag. The publish
-path has a hard invariant that refuses any payload containing a `.pdb`.
-
-Nothing is lost by this, for two reasons. First, **every local build produces its own
-PDBs**, so a programmer who needs to debug presses **Build Locally** and uses theirs.
-Second, symbols could never be usefully shared anyway. A PDB is bound to the exact DLL its
-linker produced, both carry a matching CodeView GUID, and the debugger refuses a mismatch:
-
-```
-UnrealEditor-Lahore.dll  ->  wants PDB dfab4233-cea4-4812-8f13-ff181ec6d85d
-UnrealEditor-Lahore.pdb  ->  contains that GUID at offset 20492
-```
-
-Relinking produces a new DLL *and* a new PDB with a new GUID, so a locally built PDB can
-never load against somebody else's binaries. There is no version of this that works.
-
-## Troubleshooting
-
-Start here:
+1. **Create the bucket.** Cloudflare dashboard, then Storage & databases, then R2, then
+   Create bucket. Pick a location hint near your team.
+2. **Create the token.** On the R2 overview page, under Account Details, next to API Tokens,
+   select Manage, then Create Account API token.
+   - Permission **Object Read & Write**. Not Admin: nothing here creates or deletes buckets.
+   - Scope it to **this bucket only**. The keys go in a file your whole team can read, so the
+     token must not be able to reach anything else in your account.
+   - Choose an **Account** token, not a User token. A User token stops working if that person
+     is removed from the account, which is a poor property for a credential the team depends on.
+   - Copy the **Secret Access Key** immediately. Cloudflare shows it once.
+3. **Fill in `Tools/unhingedsync.json`** in the project, and commit it. See below.
+4. **Set the lifecycle rules** on the bucket. Settings, then Object Lifecycle Rules.
+   - `claims/` expire after **1 day**
+   - everything else expires after **30 days**
+5. **Verify**, then publish the first build:
 
 ```bash
-UnhingedSync.exe --selftest %TEMP%\selftest.json
+UnhingedSync.exe --storagetest --write
+UnhingedSync.exe --build
 ```
 
-This exercises config, the project list, engine resolution, the embedded scripts, the
-Diversion CLI, the record store, the install marker and build capability, then writes a
-JSON report. Exit code 0 means everything passed.
+6. Send teammates the zip. They need nothing else.
 
-| Symptom | Likely cause |
-|---|---|
-| "Binary share not reachable" | Syncthing is not running, or the folder path does not exist. |
-| The build list is empty but the folder has builds in it | Press **Refresh**. The app follows Syncthing's folder path, and adopting it happens on refresh. The log says which folder it settled on. |
-| The build list is empty but teammates see builds | Syncthing has probably not finished the first sync. Check the percentage in **Sharing...**, and that a peer is actually offering you the folder. |
-| "Syncthing is running but will not let this app in" | Syncthing's live settings have diverged from its `config.xml`, so the API key the app read is rejected. Open the Syncthing UI, copy the key from Actions then Settings, and add it to `config.local.json` as `"syncthingApiKey"`. Restarting Syncthing often fixes it outright. |
-| "Cannot confirm what this machine is allowed to do" in Manage Binaries | Deleting stays disabled until Syncthing can confirm the folder is send-receive, because deleting on a receive-only share destroys your only copy and frees nothing for anyone. Start Syncthing and press Refresh. |
-| A red badge | Open **Build Log** for the actual compiler output. |
-| Compile fails with errors inside untouched engine headers | Run the engine integrity check below. |
+Do step 4 from the dashboard rather than expecting the app to do it. Bucket configuration
+needs admin level permission, and the token above is deliberately scoped to objects only.
 
-Other headless modes:
+## The storage configuration
 
-```bash
-UnhingedSync.exe --syncthing
-UnhingedSync.exe --fetch
-UnhingedSync.exe --fetch dv.commit.52
+`Tools/unhingedsync.json` inside the project. **Commit it.** It is how the team agrees on
+everything below, and it is what makes a teammate's setup a single step.
+
+```json
+"storage": {
+  "provider": "r2",
+  "accountId": "your-cloudflare-account-id",
+  "bucket": "your-bucket",
+  "accessKeyId": "from the R2 API token",
+  "secretAccessKey": "from the R2 API token",
+  "endpointUrl": "",
+  "prefix": ""
+}
 ```
 
-`--syncthing` reports what the app can see of the local Syncthing: device ID, peers, sync
-percentage. `--fetch` installs binaries for the current commit with no window. It never
-syncs and never builds, so it is safe to run blind.
+`endpointUrl` stays empty for R2, where it is derived from the account ID. Set it to point at
+any other S3 compatible service. `prefix` lets one bucket hold several projects.
 
-### Before blaming the tool for a failed compile
+**This file is private and must never reach the Unhinged Sync repository, which is public.**
+The repository's `.gitignore` refuses any stray copy, but the habit matters more than the guard.
 
-```bash
-pwsh -File "%LOCALAPPDATA%\UnhingedSync\scripts\<version>\Test-EngineIntegrity.ps1"
-```
+### Both keys are in there on purpose
 
-Replace `<version>` with the version shown in the app's top right corner.
+One committed file means a teammate who syncs the project is configured with nothing further
+to do. The trade, stated plainly rather than left to be discovered: **anyone who can open the
+project can publish and delete builds.** The storage layer enforces nothing, and the
+confirmations in the app are guards against mistakes rather than against people.
 
-A partially applied engine patch leaves `Engine/Source` newer than the UnrealHeaderTool
-output shipped beside it, and every `UCLASS` line number shifts. The compiler then reports
-errors inside engine headers nobody touched, looking nothing like the real cause. This
-exact state once cost a full day. Exit code 0 is clean. Exit code 1 names the files and
-tells you to run Verify in the Epic Games Launcher.
+That is a reasonable trade here because binaries are regenerable. The worst case is that
+somebody recompiles. If you ever need real enforcement, split it into a read only token in
+this file and a write token per publishing machine in `config.local.json`. Note that R2's
+token permissions are coarse, so *can publish* and *can delete* are the same capability
+either way.
 
-## The shared folder
-
-One folder, replicated by Syncthing.
-
-```
-<publish root>/
-  <Project>-<Target>-<Platform>-<Config>-<commit>.zip
-  records/<commit>-<MACHINE>.json    one per build, append only
-  claims/<commit>-<MACHINE>.claim    a build in flight
-  logs/<commit>-<MACHINE>.log
-  App/UnhingedSync.exe               optional, so the tool can distribute itself
-```
-
-There is deliberately **no shared index file**. Several people publish into the same
-replicated folder, and a single mutable file would produce `sync-conflict` copies and lose
-records. Every write is either uniquely named or append only, and readers enumerate
-`records/*.json` and merge them.
-
-Because retention deletes zips but only the publishing machine ever rewrites its own
-record, a reader treats *"the record says success but the zip is gone"* as **expired**, and
-*"the zip is present but the wrong size"* as **still syncing**. Both cases are handled for
-you.
-
-**Do not put the shared folder inside your project.** It would sit in the Diversion
-workspace, where `dv clean` deletes ignored files, and it would be wiped without warning.
-The app will not choose such a location itself.
-
-## Configuration
-
-### Committed, shared by the team
-
-`Tools/unhingedsync.json` inside the project. **Commit this file.** It is generated on
-first open, derived from the `.uproject`.
+### The rest of the file
 
 | Key | Notes |
 |---|---|
 | `projectName`, `projectFile` | Taken from the `.uproject`. |
 | `editorTarget` | From `Source/*Editor.Target.cs` if present, otherwise `<Project>Editor`. |
-| `syncthingFolderId` | **Must be byte identical on every machine.** It is how Syncthing decides two peers mean the same folder. Generated deterministically as `unhinged-<slug>-<hash>` so nobody has to coordinate. |
-| `retainBuilds` | How many successful builds keep their zips. Older ones become expired. |
-| `engine.expectedBuildId` | The team's engine build. Recorded on first open. Update it in the same commit as an engine upgrade. |
+| `retainBuilds` | How many builds the manual clean up keeps. Routine cleanup is the lifecycle rule. |
+| `engine.expectedBuildId` | The team's engine build. Update it in the same commit as an engine upgrade. |
 | `engine.enforceBuildIdMatch` | Whether a mismatched engine build blocks installing. |
 | `toolchain.compilerVersion` | `"Latest"`, or an exact MSVC version for reproducibility. |
 | `toolchain.useXge` | Incredibuild. Off by default. |
@@ -352,68 +143,187 @@ first open, derived from the `.uproject`.
 Unreal **bans** some shipped MSVC versions outright. See `BannedVisualCppVersions` in
 `Engine/Config/Windows/Windows_SDK.json` in your engine install.
 
-### Per machine, never committed
+Machine specific settings live in `%LOCALAPPDATA%\UnhingedSync\config.local.json`: the known
+project list, the per project engine choice, and update check bookkeeping.
 
-`%LOCALAPPDATA%\UnhingedSync\config.local.json` holds the publish root, the known project
-list, this machine's role, the per project engine choice, update check bookkeeping, and an
-optional `syncthingApiKey`.
+## Daily usage
 
-Your display name and which peers are hubs are **not** stored here. Those live in
-Syncthing's own configuration, because Syncthing is what acts on them.
+**Sync & Ensure Binaries** is the whole job:
 
-## Where the shared folder lives
+1. Pulls the latest commit from Diversion.
+2. Looks for published binaries matching that commit and your engine.
+3. Downloads them, verifies the checksum, and installs. It never installs mismatched binaries.
+4. If none exist, it stops and tells you why. It does **not** compile.
 
-**Paths do not have to match between teammates, and there is nothing to coordinate.** Only
-`syncthingFolderId` has to be byte-identical across the team. Syncthing folder paths are
-per-machine, so one person can keep the share on `D:\Builds` and another under their user
-profile, and they sync perfectly.
+**It will never build for you, and that is deliberate.** Compiling on a miss makes the button
+succeed no matter what, which hides the failure that matters. A thirty minute compile ending
+in a working editor looks like success, so a genuine problem goes unnoticed until it reaches
+somebody who cannot compile at all.
 
-Two things could disagree about the path: Syncthing, which is actually moving the bytes, and
-this app, which reads the folder. **Syncthing always wins.** The app checks the running
-daemon on every refresh and follows it, logging one line. If the app read anywhere else it
-would simply be wrong, and the symptom is nasty precisely because it looks benign: an empty
-build list, indistinguishable from nobody having published anything.
+So when binaries are missing you get told which situation it is: nothing published for this
+commit, or the bucket could not be reached. If it is the former and you have a toolchain,
+press **Build Locally**.
 
-That covers the case that actually bit us. A teammate accepted the folder offer in
-Syncthing's own web UI and chose their own path, and the app, which had resolved a default at
-startup, never noticed. It now re-checks and follows.
+### The other buttons
 
-On a machine with nothing configured, the folder goes to `%USERPROFILE%\UnhingedShare`. It is
-always writable, it is never inside the Diversion workspace where `dv clean` would delete it,
-and because paths need not match, per-user is no downside.
+| Button | What it does |
+|---|---|
+| **Refresh** | Re-reads Diversion and the bucket. |
+| **Manage Binaries...** | Every published build with its size. Delete specific ones, or keep the newest few. |
+| **Fetch Selected** | Installs a specific commit's binaries. Warns first if it does not match your workspace. |
+| **Build Locally** | Compiles here and publishes. This is also how you get debuggable symbols. |
+| **Build Log** | Downloads the published compiler output for the selected commit. How you find out why a red badge is red. |
+| **Copy Diagnostics** | Puts version, engine, paths, bucket state and recent log on the clipboard. Paste when reporting a problem. |
+| **Open Editor** | Launches the project. Asks for confirmation if your binaries do not match your workspace. |
+| **Check for updates** | Asks GitHub for a newer release now. |
 
-If you want it elsewhere, **move the folder in Syncthing** and the app will follow on the
-next refresh. That is the supported way, and it is one place rather than two.
+### Reading the commit list
 
-There is also an `UNHINGEDSYNC_PUBLISH_ROOT` environment variable, which overrides everything
-including Syncthing. It exists for scripting and CI. Do not hand it to a teammate as a fix
-for anything: moving the folder in Syncthing is easier and cannot drift.
+| Badge | Meaning |
+|---|---|
+| Green dot | Published and ready to install |
+| Blue triangle | Someone is building this commit right now |
+| Red cross | The build failed. Open the Build Log |
+| Grey circle | Expired. The lifecycle rule removed it |
+| Plain dash | Nobody has built this commit |
 
-Full resolution order, for reference:
+A triangle in the left column marks your workspace commit, a tick marks the binaries you have
+installed. Columns sort on what they mean rather than on their text, so commit numbers sort
+numerically and dates chronologically.
 
-1. `UNHINGEDSYNC_PUBLISH_ROOT`, if set.
-2. Syncthing's path for the project's folder ID, from the running daemon, falling back to its
-   config file.
-3. The value saved in `config.local.json`.
-4. The folder the executable sits in, if it looks like a share.
-5. `%USERPROFILE%\UnhingedShare`.
+There is no "still downloading" state, because there is no partially arrived one. A build is
+in the bucket or it is not, and a download either completed and verified its checksum or left
+nothing behind.
 
-Steps 3 to 5 only decide the first run. From then on, Syncthing is the answer.
+### Claims: when someone else is already building
 
-### The engine selector
+Two people on the same commit with no binaries could both start a thirty minute compile for
+identical output. So before building, a machine writes a small marker saying it is building
+that commit, and everyone else is told rather than duplicating the work.
 
-This picks which installed engine to build with. The *version* a project targets is a team
-decision and comes from the `.uproject`, so this only chooses between installs on **your**
-machine, and the choice is stored per machine.
+Claims never block anything. **Build Locally ignores them entirely**, so it is always the way
+past one. The app also discards any claim older than 90 minutes, and the lifecycle rule
+deletes them after a day, so a machine that crashed mid build stops advertising a phantom
+build on its own. Messages include how long ago a build started, because a claim four minutes
+old means wait and one eighty minutes old probably means that machine died.
 
-There are two guard rails, because most cross version choices genuinely do not work:
+### Why the mismatch warning matters
 
-- Choosing a different version from the `.uproject` gives you a hard warning. Assets are
-  versioned to the engine that wrote them, so building fails, and *opening* the project
-  with a newer engine can upgrade assets irreversibly.
-- Choosing a same version engine whose **BuildId** differs from the team's, such as a
-  source build sitting next to a launcher build, is also caught. Its binaries would not be
-  interchangeable with everyone else's.
+If your installed binaries are not from your workspace commit, **do not open the editor**.
+
+Mismatched C++ and content is the one failure here that can lose work. If a `UPROPERTY`
+changed between the two commits, assets serialised against the newer code can silently drop
+data when they are resaved. Open Editor asks for confirmation and names both commits.
+Everything else fails safely, and the worst case is that you compile locally.
+
+## PDBs are not published
+
+Measured on a real build: the binaries zip is 9.5 MB and the symbols are 780 MB.
+
+Every local build produces its own PDBs and they stay on that machine, so a programmer who
+needs to debug presses **Build Locally** and uses theirs. The publish path has a hard
+invariant that refuses any payload containing a `.pdb`.
+
+Worth being precise about why, because the reason changed. Under peer to peer replication
+this was a hard constraint: everything in the shared folder went to every subscriber, so
+publishing symbols would have cost every artist about 8 GB for a debugger they never open.
+Downloads are on demand now, so that constraint is gone and this is a **choice** rather than
+a limit. Publishing symbols for on demand download is a viable feature, and it is simply not
+built yet.
+
+What has not changed is that symbols can only ever be used with the exact DLLs they were
+linked against. Both carry a matching CodeView GUID and the debugger refuses a mismatch:
+
+```
+UnrealEditor-Lahore.dll  ->  wants PDB dfab4233-cea4-4812-8f13-ff181ec6d85d
+UnrealEditor-Lahore.pdb  ->  contains that GUID at offset 20492
+```
+
+Relinking produces a new DLL and a new PDB with a new GUID, so a locally built PDB can never
+load against somebody else's binaries.
+
+## What is in the bucket
+
+```
+<prefix>/
+  <Project>-<Target>-<Platform>-<Config>-<commit>.zip
+  records/<commit>-<MACHINE>.json
+  claims/<commit>-<MACHINE>.claim
+  logs/<commit>-<MACHINE>.log
+```
+
+There is exactly **one binary per commit**. The zip key carries no machine name, so a second
+build of a commit overwrites the first rather than adding a duplicate. Records and logs are
+pruned to one each per commit after a successful publish, and only after a success, so a
+failed build can never delete the record of a working one.
+
+Every download is verified against the SHA256 in its record before it is used, and lands at
+its real filename only once verified.
+
+### Cleanup
+
+Two mechanisms, deliberately different:
+
+- **The lifecycle rules do routine cleanup**, server side, needing no credential and no app
+  running. They also cannot race anybody, which matters: the old count based retention pass
+  could delete the zip a teammate was midway through downloading.
+- **Manage Binaries** does cleanup on demand, including "keep the newest N".
+
+Note that lifecycle rules are time based only. There is no "keep the newest twenty" rule in
+S3 or R2, which is why count based cleanup is a client side action.
+
+Cost is not the reason to prune. The free tier is 10 GB, which at roughly 10 MB a build is
+about a thousand of them.
+
+## When something is wrong
+
+```bash
+UnhingedSync.exe --selftest
+```
+
+Exercises config, the project list, engine resolution, the embedded scripts, the Diversion
+CLI, the bucket, the install marker and build capability, then prints a summary and writes a
+JSON report. Exit 0 means everything passed. **Run this first.**
+
+```bash
+UnhingedSync.exe --storagetest            # bucket and token, read only
+UnhingedSync.exe --storagetest --write    # also proves publishing works
+UnhingedSync.exe --fetch                  # install binaries for the current commit
+UnhingedSync.exe --fetch dv.commit.52     # install a specific commit
+UnhingedSync.exe --build                  # compile and publish, no window
+```
+
+`--storagetest` exists because every way the bucket can be misconfigured otherwise surfaces
+as the same "no builds found". It separates a wrong bucket name, a token scoped elsewhere, a
+read only token, and a bad account ID.
+
+`--build` is the same path the button uses, so a build machine can run it from a scheduled
+task without a second implementation to drift out of step.
+
+| Symptom | Likely cause |
+|---|---|
+| "No bucket configured for this project" | The `storage` block is empty. If your team already uses this tool, the project has not finished syncing. |
+| "A blank configuration was generated" | Same cause, caught earlier. Sync the project, delete the generated file, reopen. |
+| "Could not reach the build store" | Network, or the token was revoked or expired. Run `--storagetest`. |
+| A red badge | Open **Build Log** for the compiler output. |
+| Compile fails inside untouched engine headers | Run the engine integrity check below. |
+
+### Before blaming the tool for a failed compile
+
+```bash
+pwsh -File "%LOCALAPPDATA%\UnhingedSync\scripts\<version>\Test-EngineIntegrity.ps1"
+```
+
+Replace `<version>` with the version in the app's top right corner.
+
+A partially applied engine patch leaves `Engine/Source` newer than the UnrealHeaderTool
+output shipped beside it, and every `UCLASS` line number shifts. The compiler then reports
+errors inside engine headers nobody touched, looking nothing like the real cause. This exact
+state once cost a full day. Exit 0 is clean. Exit 1 names the files and tells you to run
+Verify in the Epic Games Launcher.
+
+**If a teammate sees behaviour you do not, compare the app version** in the top right first.
+Mismatched copies of the tool are the single most likely explanation.
 
 ## For maintainers
 
@@ -429,83 +339,63 @@ scripts/                    PowerShell, embedded into the exe at build time
 dotnet build src/UnhingedSync/UnhingedSync.csproj
 ```
 
-The scripts under `scripts/` are compiled into the executable as embedded resources and
-extracted at runtime to `%LOCALAPPDATA%\UnhingedSync\scripts\<version>`. Two consequences
-are worth knowing before editing them:
+The scripts under `scripts/` are compiled in as embedded resources and extracted at runtime
+to `%LOCALAPPDATA%\UnhingedSync\scripts\<version>`. Three consequences before editing them:
 
-- **A script cannot infer which project it operates on.** It runs from that cache folder,
-  so `$PSScriptRoot` says nothing about the project. The app passes `-ProjectRoot` and
-  `-PublishRoot` explicitly. The scripts also honour `UNHINGEDSYNC_PROJECT_ROOT`, and only
-  fall back to deriving from their own location when run in place from a checkout.
+- **A script cannot infer which project it operates on.** It runs from that cache folder, so
+  `$PSScriptRoot` says nothing about the project. The app passes `-ProjectRoot` explicitly.
+- **A script never sees a credential.** The build script writes into a local staging folder
+  and the app uploads from there. Passing a secret as a script parameter would put it in the
+  process command line for any local process to read.
 - **Editing a script does nothing until you rebuild.** The exe carries its own copy.
 
-Every script begins with `#Requires -Version 7.0`. Windows PowerShell 5.1 has no
-`utf8NoBOM` encoding, and the JSON records here must be BOM free for the app to parse them,
-so 5.1 has to refuse at parse time rather than fail halfway through a build.
-
-Nothing in this repository is specific to any one game project. Per project settings live
-in that project's own `Tools/unhingedsync.json`, which the app generates and the team
-commits.
+Every script begins with `#Requires -Version 7.0`, placed **after** the comment based help
+block. Before it, PowerShell stops recognising the help and silently drops every documented
+parameter.
 
 ### Cutting a release
 
-1. Bump `<Version>` in `src/UnhingedSync/UnhingedSync.csproj` to match the tag you are
-   about to push.
-2. Commit.
-3. Tag and push:
+1. Bump `<Version>` in `src/UnhingedSync/UnhingedSync.csproj` to match the tag.
+2. Commit, then tag and push:
 
 ```bash
-git tag v1.1.0 && git push origin v1.1.0
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
-The workflow in `.github/workflows/release.yml` derives the version from the tag, stamps it
-into the build, verifies the built executable reports it, zips the result and publishes a
-GitHub Release. Every teammate's app is then offered that release automatically.
+CI derives the version from the tag, stamps it into the build, verifies the built executable
+reports it, zips the result and publishes a GitHub Release. Every teammate's app is then
+offered that release automatically. The verification step exists because a release whose exe
+under reports its own version offers itself to the whole team forever, since installing it
+never changes what they report.
 
-The tag is the source of truth for the version, and CI fails the release if the built
-executable disagrees with it. That guard exists because a release whose exe under reports
-its own version offers itself to the whole team forever, since installing it never changes
-what they report.
-
-The repository is public specifically so the update check needs no token. The alternative
-was distributing and rotating a GitHub access token to everybody on the team purely to read
-release metadata.
-
-To build a zip by hand, for local testing or before any tag exists:
-
-```bash
-dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
-Compress-Archive -Path dist/UnhingedSync.exe -DestinationPath UnhingedSync.zip -Force
-```
+The repository is public specifically so the update check needs no token.
 
 **The first release has to be delivered by hand.** Anyone running a build made before the
-updater existed has no update code in their copy, so they need one zip sent to them
-directly. After that, updates are automatic.
+updater existed has no update code in their copy.
 
 ### Verifying a change
 
 ```bash
-UnhingedSync.exe --selftest    # services against the real machine
+UnhingedSync.exe --selftest    # services against the real machine and bucket
 UnhingedSync.exe --uitest      # builds every window and forces a layout pass
 ```
 
-`--uitest` exists because parsing a XAML template and *applying* one are different things.
-A template can load fine from the resource dictionary and still throw when a control uses
-it, and nothing else in the headless modes instantiates a window. It catches theming
-regressions that `--selftest` cannot see.
+`--uitest` exists because parsing a XAML template and applying one are different things. A
+template can load from the resource dictionary and still throw when a control uses it, and
+nothing else instantiates a window. It has caught two real regressions, including one
+introduced by the test itself.
 
-Neither of them proves a feature works. They prove the plumbing is connected.
+Neither proves a feature works. They prove the plumbing is connected. A change to the
+publish or install path should be verified with a real `--build` followed by a real `--fetch`.
 
 ## Limits
 
 - **Diversion only.** The version control integration is isolated behind one class, but
-  commit identity and ordering are Diversion shaped. On a non Diversion project the app
-  starts, configures itself, and then fails clearly on the `dv` checks.
-- **Windows only.** Paths, the engine lookup and the startup shortcut are all Win32.
+  commit identity and ordering are Diversion shaped.
+- **Windows only.** Paths and the engine lookup are Win32.
 - **One engine version per project**, as the `.uproject` dictates. That is Unreal's
   constraint, not this tool's.
-- **Editor binaries only.** No packaged or cooked builds. That would be a separate feature
-  on the same build host.
-- **No automatic refresh.** The commit list updates when you press Refresh or run an
-  action, not on a timer. If a teammate is building something you need, you have to check
-  back.
+- **Editor binaries only.** No packaged or cooked builds yet. On demand download makes that
+  practical now; it is simply not built.
+- **No automatic refresh.** The commit list updates when you press Refresh or run an action,
+  not on a timer. If somebody is building something you need, you have to check back.
