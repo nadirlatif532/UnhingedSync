@@ -158,6 +158,21 @@ public static class ConfigLoader
     public static string GetSyncthingApiKey() =>
         ReadLocalJson()?["syncthingApiKey"]?.GetValue<string>() ?? "";
 
+    /// <summary>
+    /// Whether this machine considers itself the team's hub. A local declaration only:
+    /// Syncthing has no such flag, because the introducer bit that makes someone a hub is
+    /// set on every other machine, not on the hub itself.
+    /// </summary>
+    public static bool GetActAsHub() =>
+        ReadLocalJson()?["actAsHub"]?.GetValue<bool>() ?? false;
+
+    public static void SetActAsHub(bool value)
+    {
+        var root = ReadLocalJson() ?? new JsonObject();
+        root["actAsHub"] = value;
+        WriteLocalJson(root);
+    }
+
     /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
     public static bool GetDeclinedPowerShellInstall() =>
         ReadLocalJson()?["declinedPowerShellInstall"]?.GetValue<bool>() ?? false;

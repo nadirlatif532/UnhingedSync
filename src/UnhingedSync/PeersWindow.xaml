@@ -47,6 +47,23 @@
         </Grid>
         <TextBlock Foreground="{StaticResource TextDim}" TextWrapping="Wrap" Margin="0,8,0,0"
                    Text="Send this to someone already in the share so they can add you, or paste theirs below to invite them. Both sides have to agree; that is Syncthing's design, not a missing feature here." />
+
+        <TextBlock Text="HOW YOU APPEAR TO OTHERS" Style="{StaticResource Label}" Margin="0,12,0,0" />
+        <Grid Margin="0,6,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <TextBox x:Name="MyNameBox" Grid.Column="0" Padding="8,6"
+                   Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Border}"
+                   BorderThickness="1" Foreground="{StaticResource Text}" FontSize="12"
+                   ToolTip="The name your teammates see for this machine. Syncthing defaults it to the computer name, which is rarely a person." />
+          <Button x:Name="SaveNameButton" Grid.Column="1" Content="Rename" Margin="8,0,0,0"
+                  Click="SaveName_Click" />
+        </Grid>
+        <TextBlock Foreground="{StaticResource TextDim}" FontSize="11" TextWrapping="Wrap"
+                   Margin="0,4,0,0"
+                   Text="Use your own name here. It is what everyone else sees in their peer list, and a list of computer names tells nobody who is who." />
       </StackPanel>
     </Border>
 
@@ -67,12 +84,38 @@
           <Button x:Name="AddPeerButton" Grid.Column="1" Content="Add &amp; share"
                   Style="{StaticResource PrimaryButton}" Margin="8,0,0,0" Click="AddPeer_Click" />
         </Grid>
+        <Grid Margin="0,8,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Their name" Style="{StaticResource Label}"
+                     VerticalAlignment="Center" Margin="0,0,8,0" />
+          <TextBox x:Name="PeerNameBox" Grid.Column="1" Padding="8,6"
+                   Background="{StaticResource PanelAlt}" BorderBrush="{StaticResource Border}"
+                   BorderThickness="1" Foreground="{StaticResource Text}" FontSize="12"
+                   ToolTip="Who this is, so your peer list is readable. Leave blank and their own name is used if they have set one." />
+        </Grid>
         <CheckBox x:Name="IntroducerCheck" Margin="0,10,0,0"
                   Foreground="{StaticResource Text}" FontSize="12"
                   Content="This machine is the team's hub, so introduce their other devices to me"
                   ToolTip="Tick this for the one or two machines that everyone pairs with. Syncthing will then learn about the rest of the team through them, so 30 people means 30 pairings instead of 435." />
         <TextBlock x:Name="IntroducerNote" Foreground="{StaticResource TextDim}" FontSize="11"
                    TextWrapping="Wrap" Margin="0,4,0,0" />
+
+        <Border Background="{StaticResource PanelAlt}" CornerRadius="5" Padding="10,8"
+                Margin="0,12,0,0">
+          <StackPanel>
+            <CheckBox x:Name="ActAsHubCheck" Click="ActAsHub_Click"
+                      Foreground="{StaticResource Text}" FontSize="12"
+                      Content="This machine acts as the team's hub"
+                      ToolTip="Records that you are the machine everyone pairs with, and offers to make sure every peer you know is being sent builds." />
+            <TextBlock x:Name="ActAsHubNote" Foreground="{StaticResource TextDim}" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,4,0,0" />
+            <TextBlock x:Name="HubSummary" Foreground="{StaticResource TextDim}" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,6,0,0" />
+          </StackPanel>
+        </Border>
       </StackPanel>
     </Border>
 
@@ -114,12 +157,23 @@
               <DataTemplate>
                 <Border Background="{StaticResource PanelAlt}" CornerRadius="5"
                         Padding="10,8" Margin="0,0,0,6">
-                  <StackPanel>
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding DeviceId}" Style="{StaticResource Label}"
-                               FontFamily="Cascadia Mono, Consolas" Margin="0,3,0,0" />
-                    <TextBlock Text="{Binding ShareText}" Style="{StaticResource Label}" Margin="0,3,0,0" />
-                  </StackPanel>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Text="{Binding DeviceId}" Style="{StaticResource Label}"
+                                 FontFamily="Cascadia Mono, Consolas" Margin="0,3,0,0" />
+                      <TextBlock Text="{Binding ShareText}" Style="{StaticResource Label}" Margin="0,3,0,0" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="{Binding HubButtonText}"
+                            IsEnabled="{Binding CanToggleHub}"
+                            Tag="{Binding}" Click="ToggleHub_Click"
+                            Margin="10,0,0,0" VerticalAlignment="Top"
+                            ToolTip="A hub introduces its other peers to you automatically, so you only ever exchange IDs with one person." />
+                  </Grid>
                 </Border>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

@@ -15,6 +15,16 @@ public partial class PeersWindow : Window
         PendingKind Kind, string Title, string Subtitle,
         string DeviceId, string FolderId, string Label);
 
+    /// <summary>
+    /// One row of the peer list. CanToggleHub travels with the row rather than being bound
+    /// to the window, because an ItemsControl row has no straightforward path to it.
+    /// </summary>
+    private sealed record PeerRow(
+        string Name, string DeviceId, string ShareText, bool IsHub, bool CanToggleHub)
+    {
+        public string HubButtonText => IsHub ? "Not a hub" : "Make hub";
+    }
+
     /// <summary>Shown in place of the device ID before one is known, and checked for
     /// before letting Copy put it on the clipboard.</summary>
     private const string NoDeviceId = "not available";
@@ -34,11 +44,17 @@ public partial class PeersWindow : Window
     {
         var status = await _syncthing.GetStatusAsync();
 
-        RunSetupButton.Visibility = status.State == SyncthingState.Running
-            ? Visibility.Collapsed : Visibility.Visible;
-        AddPeerButton.IsEnabled = status.State == SyncthingState.Running;
+        var running = status.State == SyncthingState.Running;
 
-        if (status.State != SyncthingState.Running)
+        RunSetupButton.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+        AddPeerButton.IsEnabled = running;
+
+        // Everything that writes to Syncthing is inert without it, and a rename box holding
+        // a name nobody can save is worse than an empty one.
+        SaveNameButton.IsEnabled = running;
+        MyNameBox.IsEnabled = running;
+
+        if (!running)
         {
             StatusHeadline.Text = status.State switch
             {
@@ -48,17 +64,24 @@ public partial class PeersWindow : Window
             };
             StatusDetail.Text = status.Detail ?? "";
             MyDeviceId.Text = NoDeviceId;
+            MyNameBox.Text = "";
             PendingList.ItemsSource = null;
             PeersList.ItemsSource = null;
             NoPending.Visibility = Visibility.Collapsed;
             NoPeers.Visibility = Visibility.Collapsed;
             FolderStatus.Text = "";
+            HubSummary.Text = "";
+            ActAsHubCheck.IsEnabled = false;
             return;
         }
 
         StatusHeadline.Text = "Syncthing is running";
         StatusDetail.Text = $"Folder '{_config.SyncthingFolderId}' at {_config.PublishRoot}";
         MyDeviceId.Text = status.DeviceId ?? "unknown";
+
+        // Not overwritten while the user is partway through typing a new one.
+        if (!MyNameBox.IsKeyboardFocusWithin)
+            MyNameBox.Text = await _syncthing.GetOwnDeviceNameAsync();
 
         await ApplyRolePolicyAsync();
 
@@ -68,11 +91,14 @@ public partial class PeersWindow : Window
 
             foreach (var device in await _syncthing.GetPendingDevicesAsync())
             {
+                // Label carries the name the device reported for itself. For a device there
+                // is no folder label to put there, and Accept needs the raw name rather than
+                // the "... wants to connect" sentence built for display.
                 pending.Add(new PendingItem(
                     PendingKind.Device,
                     $"{device.Name} wants to connect",
                     $"{device.DeviceId}   {device.Address}".Trim(),
-                    device.DeviceId, "", ""));
+                    device.DeviceId, "", device.Name));
             }
 
             foreach (var folder in await _syncthing.GetPendingFoldersAsync())
@@ -88,16 +114,21 @@ public partial class PeersWindow : Window
             NoPending.Visibility = pending.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
             var peers = await _syncthing.GetPeersAsync(_config.SyncthingFolderId);
-            PeersList.ItemsSource = peers.Select(p => new
-            {
+            PeersList.ItemsSource = peers.Select(p => new PeerRow(
                 p.Name,
                 p.DeviceId,
-                ShareText = (p.SharesOurFolder
+                (p.SharesOurFolder
                     ? $"Sharing the binaries folder, {p.CompletionPercent}% in sync with them"
                     : "Connected, but not sharing the binaries folder yet")
-                    + (p.IsIntroducer ? "   ·   hub (introduces others to you)" : "")
-            }).ToList();
+                + (p.IsIntroducer ? "   ·   hub (introduces others to you)" : ""),
+                p.IsIntroducer,
+                _mayIntroduce)).ToList();
             NoPeers.Visibility = peers.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            var hubCount = peers.Count(p => p.IsIntroducer);
+            HubSummary.Text = hubCount == 0
+                ? "No hub set. You will only sync with peers you pair with by hand."
+                : $"{hubCount} hub(s): {string.Join(", ", peers.Where(p => p.IsIntroducer).Select(p => p.Name))}";
 
             var local = await _syncthing.GetLocalCompletionAsync(_config.SyncthingFolderId);
             FolderStatus.Text = $"Your copy of the folder: {local}% complete";
@@ -128,9 +159,12 @@ public partial class PeersWindow : Window
             AddPeerButton.IsEnabled = false;
             var isIntroducer = IntroducerCheck.IsChecked == true;
 
-            await _syncthing.AddDeviceAsync(id, PeerName(isIntroducer), isIntroducer);
+            // A device we are inviting has not contacted us, so there is no name of theirs
+            // to fall back on. Whatever was typed is all we have.
+            await _syncthing.AddDeviceAsync(id, PeerName(isIntroducer, null, id), isIntroducer);
             await _syncthing.ShareFolderWithAsync(_config.SyncthingFolderId, id);
             PeerIdBox.Clear();
+            PeerNameBox.Clear();
             IntroducerCheck.IsChecked = false;
 
             MessageBox.Show(
@@ -171,7 +205,10 @@ public partial class PeersWindow : Window
                     "Is this your team's hub?",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 
-                await _syncthing.AddDeviceAsync(item.DeviceId, PeerName(asHub), asHub);
+                // item.Title carries the name the requesting device reported for itself,
+                // which is the best answer available unless the user typed one.
+                await _syncthing.AddDeviceAsync(
+                    item.DeviceId, PeerName(asHub, item.Label, item.DeviceId), asHub);
                 await _syncthing.ShareFolderWithAsync(_config.SyncthingFolderId, item.DeviceId);
             }
             else
@@ -246,11 +283,43 @@ public partial class PeersWindow : Window
                     "Run the setup first if you need to mark a hub as introducer."
             };
 
+        // Acting as the hub is a publishing machine's job. An artist's laptop being the one
+        // everyone pairs with would mean the share depends on a machine that cannot build,
+        // and the checkbox also hands out folder-creation trust.
+        ActAsHubCheck.IsEnabled = mayIntroduce;
+        ActAsHubCheck.IsChecked = mayIntroduce && ConfigLoader.GetActAsHub();
+        ActAsHubNote.Text = mayIntroduce
+            ? "Syncthing has no flag for this. Teammates make you their hub by ticking the box " +
+              "above against your device ID, so ticking here records the intention and keeps " +
+              "every peer you know supplied with builds."
+            : "Only a programmer or build host can act as the hub.";
+
         RoleBadge.Text = string.IsNullOrEmpty(role) ? "role: unknown" : $"role: {role}";
     }
 
-    private string PeerName(bool isIntroducer) =>
-        isIntroducer ? $"{_config.ProjectName} hub" : $"{_config.ProjectName} teammate";
+    /// <summary>
+    /// Settles what to call a peer, best information first.
+    ///
+    /// This used to return nothing but "&lt;Project&gt; teammate" for everybody, which on a team
+    /// of thirty produced thirty identical rows and made the peer list useless for the one
+    /// thing it is for: seeing who is in sync. Worse, a device requesting a connection
+    /// already tells us its own name, and that was being thrown away.
+    ///
+    /// So: what the user typed, else what the device calls itself, else a labelled fallback
+    /// with a few ID characters so at least two unnamed peers can be told apart.
+    /// </summary>
+    private string PeerName(bool isIntroducer, string? theirOwnName, string deviceId)
+    {
+        if (PeerNameBox.Text.Trim() is { Length: > 0 } typed) return typed;
+
+        if (theirOwnName?.Trim() is { Length: > 0 } reported &&
+            !reported.Equals("(unnamed)", StringComparison.Ordinal))
+            return reported;
+
+        var suffix = deviceId.Replace("-", "");
+        suffix = suffix.Length >= 7 ? suffix[..7] : deviceId;
+        return isIntroducer ? $"{_config.ProjectName} hub ({suffix})" : $"teammate {suffix}";
+    }
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
@@ -264,6 +333,128 @@ public partial class PeersWindow : Window
         {
             // Another process can hold the clipboard open; not worth a dialog.
             FolderStatus.Text = "Could not reach the clipboard. Select the ID and copy it manually.";
+        }
+    }
+
+    private async void SaveName_Click(object sender, RoutedEventArgs e)
+    {
+        var name = MyNameBox.Text.Trim();
+        if (name.Length == 0)
+        {
+            MessageBox.Show(this, "Give this machine a name your teammates will recognise.",
+                "Name required", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            SaveNameButton.IsEnabled = false;
+            await _syncthing.SetOwnDeviceNameAsync(name);
+            FolderStatus.Text = $"This machine now appears as '{name}'.";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not rename this machine",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SaveNameButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Promotes or demotes one peer as a hub. Same policy as everything else that grants
+    /// introducer trust: only a machine that builds may do it.
+    /// </summary>
+    private async void ToggleHub_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: PeerRow row }) return;
+        if (!_mayIntroduce) return;
+
+        if (!row.IsHub)
+        {
+            var confirm = MessageBox.Show(this,
+                $"Treat '{row.Name}' as a hub?\n\n" +
+                "That means this machine will automatically accept the devices they introduce, " +
+                "and will let them offer you new folders. Only do this for a machine you would " +
+                "trust to run the share.",
+                "Make this peer a hub", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes) return;
+        }
+
+        try
+        {
+            await _syncthing.SetPeerIsHubAsync(row.DeviceId, !row.IsHub);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not change that peer",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            await RefreshAsync();
+        }
+    }
+
+    /// <summary>
+    /// Records that this machine is willing to act as the team's hub.
+    ///
+    /// Worth being precise, because the name suggests more than Syncthing can offer: there
+    /// is no "I am a hub" flag. The introducer flag lives on everyone ELSE's machine, so a
+    /// machine becomes the hub only when other people tick "this machine is the team's hub"
+    /// against it. Declaring it here cannot make that happen.
+    ///
+    /// What it does do is real, though: it records the intention so the app stops nagging
+    /// about having no hub, and it offers the one mechanical step the hub owner does have to
+    /// take, which is making sure every peer it knows is actually being offered the folder.
+    /// Without that, introductions spread device knowledge but nobody receives any builds.
+    /// </summary>
+    private async void ActAsHub_Click(object sender, RoutedEventArgs e)
+    {
+        var wants = ActAsHubCheck.IsChecked == true;
+        ConfigLoader.SetActAsHub(wants);
+
+        if (!wants)
+        {
+            FolderStatus.Text = "No longer advertising this machine as the hub.";
+            return;
+        }
+
+        var share = MessageBox.Show(this,
+            "Recorded. Two things to know.\n\n" +
+            "Syncthing has no flag for being a hub. Each teammate makes you their hub by " +
+            "ticking \"this machine is the team's hub\" when they add you, so hand out your " +
+            "device ID and they do the rest.\n\n" +
+            "The part that is yours to do: every peer you know should be offered the binaries " +
+            "folder, or introductions spread contacts without spreading builds.\n\n" +
+            "Offer the folder to all peers now?",
+            "Acting as the hub", MessageBoxButton.YesNo, MessageBoxImage.Information);
+
+        if (share != MessageBoxResult.Yes) return;
+
+        try
+        {
+            var peers = await _syncthing.GetPeersAsync(_config.SyncthingFolderId);
+            var added = 0;
+            foreach (var peer in peers.Where(p => !p.SharesOurFolder))
+            {
+                await _syncthing.ShareFolderWithAsync(_config.SyncthingFolderId, peer.DeviceId);
+                added++;
+            }
+            FolderStatus.Text = added == 0
+                ? "Every peer was already offered the folder."
+                : $"Offered the folder to {added} more peer(s).";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Could not offer the folder",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            await RefreshAsync();
         }
     }
 

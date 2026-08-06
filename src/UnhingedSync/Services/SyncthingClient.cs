@@ -363,6 +363,59 @@ public sealed class SyncthingClient
         return folder?["type"]?.GetValue<string>() ?? "";
     }
 
+    /// <summary>
+    /// The name other people see for this machine.
+    ///
+    /// Syncthing defaults it to the hostname, which on a team of thirty means everyone's
+    /// peer list is full of entries like DESKTOP-4B7QK2 with no way to tell whose machine
+    /// that is.
+    /// </summary>
+    public async Task<string> GetOwnDeviceNameAsync(CancellationToken ct = default)
+    {
+        var status = await TryGetAsync("system/status", ct);
+        if (status?["myID"]?.GetValue<string>() is not { Length: > 0 } myId) return "";
+
+        var device = await TryGetAsync($"config/devices/{myId}", ct);
+        return device?["name"]?.GetValue<string>() ?? "";
+    }
+
+    /// <summary>
+    /// Renames this machine. Read-modify-write of our own device entry rather than a
+    /// hand-built body, because that entry carries compression, rate limits and any
+    /// addresses the user set, and a fresh object would silently reset all of it.
+    /// </summary>
+    public async Task SetOwnDeviceNameAsync(string name, CancellationToken ct = default)
+    {
+        var status = await GetAsync("system/status", ct);
+        var myId = status?["myID"]?.GetValue<string>()
+            ?? throw new InvalidOperationException("Syncthing did not report this machine's device ID.");
+
+        var device = await GetAsync($"config/devices/{myId}", ct)
+            ?? throw new InvalidOperationException("Syncthing has no configuration for this machine.");
+
+        device["name"] = name;
+        await PutAsync($"config/devices/{myId}", device, ct);
+    }
+
+    /// <summary>
+    /// Promotes or demotes a peer as an introducer, which is what "hub" means mechanically.
+    ///
+    /// Read-modify-write for the same reason as renaming: the device entry holds addresses,
+    /// compression and rate limits that a rebuilt object would quietly discard.
+    /// autoAcceptFolders moves with the flag, matching AddDeviceAsync, because letting a
+    /// device create folders on our disk is reasonable for a hub we chose and reckless
+    /// otherwise.
+    /// </summary>
+    public async Task SetPeerIsHubAsync(string deviceId, bool isHub, CancellationToken ct = default)
+    {
+        var device = await GetAsync($"config/devices/{deviceId}", ct)
+            ?? throw new InvalidOperationException($"Syncthing does not know device {deviceId}.");
+
+        device["introducer"] = isHub;
+        device["autoAcceptFolders"] = isHub;
+        await PutAsync($"config/devices/{deviceId}", device, ct);
+    }
+
     /// <summary>Our own view of how much of the folder has arrived, 0-100.</summary>
     public async Task<int> GetLocalCompletionAsync(string folderId, CancellationToken ct = default)
     {
