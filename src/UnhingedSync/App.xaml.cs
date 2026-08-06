@@ -51,17 +51,32 @@ public partial class App : Application
             return;
         }
 
+        // A dispatcher exception would otherwise kill the process outright, with a Windows
+        // crash dialog and no explanation. Nothing here is important enough to lose work
+        // over, so report it and carry on.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            MessageBox.Show(
+                $"{args.Exception.Message}\n\n{args.Exception.GetType().Name}\n\n" +
+                "The app is still running. Use Copy Diagnostics if you need to report this.",
+                "Something went wrong", MessageBoxButton.OK, MessageBoxImage.Error);
+            args.Handled = true;
+        };
+
         try
         {
             UpdateChecker.CleanUpAfterRelaunch();
-            await EnsurePowerShellAsync();
             if (!EnsureAtLeastOneProject()) { Shutdown(1); return; }
             if (!EnsurePublishRoot()) { Shutdown(1); return; }
-            new MainWindow().Show();
 
-            // Fire-and-forget: a GitHub round trip should never delay the window
-            // appearing, and a failed check should never be louder than a missed one.
-            _ = UpdateChecker.CheckAsync();
+            var window = new MainWindow();
+            window.Show();
+
+            // Both of these prompt, so they run only once there is a window to own the
+            // dialogs and to be visibly frozen behind them. Before the window existed, a
+            // winget install or a 55 MB download left the user staring at nothing at all.
+            await EnsurePowerShellAsync(window);
+            _ = UpdateChecker.CheckAsync(window);
         }
         catch (Exception ex)
         {
@@ -82,17 +97,18 @@ public partial class App : Application
     /// Declining doesn't block the app: fetching and installing binaries someone else
     /// already built needs no PowerShell at all. It just won't ask again this machine.
     /// </summary>
-    private static async Task EnsurePowerShellAsync()
+    private static async Task EnsurePowerShellAsync(Window owner)
     {
         if (PowerShellLocator.IsAvailable) return;
         if (ConfigLoader.GetDeclinedPowerShellInstall()) return;
 
-        var choice = MessageBox.Show(
+        var choice = MessageBox.Show(owner,
             "PowerShell 7 was not found on this machine.\n\n" +
             "It's required to build binaries locally and to run Syncthing setup from this " +
             "app. Fetching and installing binaries someone else already built still works " +
             "fine without it.\n\n" +
-            "Install PowerShell 7 now?",
+            "Install PowerShell 7 now? This can take a few minutes and may ask for " +
+            "administrator permission.",
             "PowerShell 7 not found", MessageBoxButton.YesNo, MessageBoxImage.Warning);
 
         if (choice != MessageBoxResult.Yes)
@@ -106,10 +122,11 @@ public partial class App : Application
         try { installed = await PowerShellLocator.InstallAsync(); }
         finally { Mouse.OverrideCursor = null; }
 
-        MessageBox.Show(
+        MessageBox.Show(owner,
             installed
                 ? "PowerShell 7 is installed."
-                : "Could not install it automatically. Install it from https://aka.ms/powershell and try again.",
+                : "Could not install it automatically. Install it from https://aka.ms/powershell, " +
+                  "then restart Unhinged Sync.",
             "PowerShell 7", MessageBoxButton.OK,
             installed ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }

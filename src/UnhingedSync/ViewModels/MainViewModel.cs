@@ -492,6 +492,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
+        // Two folders, one of them empty, is otherwise indistinguishable from "nobody has
+        // published anything" -- and that misreading cost real time once already.
+        var syncthingPath = SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
+        if (!string.IsNullOrEmpty(syncthingPath) &&
+            !Path.TrimEndingDirectorySeparator(syncthingPath)
+                 .Equals(Path.TrimEndingDirectorySeparator(_config.PublishRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            SetStatus(StatusKind.Warning, "This app and Syncthing disagree about where builds live",
+                $"Syncthing replicates {syncthingPath}, but this app is reading " +
+                $"{_config.PublishRoot}. Builds will look missing until they match. Fix the " +
+                "publishRoot in config.local.json, or re-point the folder in Syncthing.");
+            return;
+        }
+
         // The .uproject states which engine version the project targets. Building with a
         // different one is not a warning-and-carry-on situation: assets are versioned to
         // the engine that wrote them.

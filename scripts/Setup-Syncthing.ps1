@@ -1,3 +1,6 @@
+#Requires -Version 7.0
+# Windows PowerShell 5.1 cannot run this script: Set-Content has no utf8NoBOM there, and a
+# BOM on the first line of .stignore silently breaks Syncthing's first ignore rule.
 <#
 .SYNOPSIS
     Sets up Syncthing on this machine for the project's binaries share.

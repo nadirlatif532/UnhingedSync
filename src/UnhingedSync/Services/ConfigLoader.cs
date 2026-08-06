@@ -144,6 +144,12 @@ public static class ConfigLoader
     public static void SetDismissedUpdateVersion(string version) =>
         SaveLocalSetting("dismissedUpdateVersion", version);
 
+    /// <summary>
+    /// The publish root this machine has saved, or empty. Exposed so the updater can
+    /// tell whether it is running from inside the replicated share.
+    /// </summary>
+    public static string GetPersistedPublishRoot() => ReadLocalOverrides()?.PublishRoot ?? "";
+
     /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
     public static bool GetDeclinedPowerShellInstall() =>
         ReadLocalJson()?["declinedPowerShellInstall"]?.GetValue<bool>() ?? false;
@@ -307,6 +313,12 @@ public static class ConfigLoader
         if (!string.IsNullOrWhiteSpace(fromEnv)) return fromEnv;
 
         if (ReadLocalOverrides()?.PublishRoot is { Length: > 0 } configured) return configured;
+
+        // Ask Syncthing where it is actually replicating this project's folder. Without
+        // this the app could invent a path under the user profile while Syncthing synced
+        // somewhere else, and the only symptom was a permanently empty build list.
+        if (SyncthingClient.TryGetFolderPathFromConfig(config.SyncthingFolderId) is { Length: > 0 } fromSyncthing)
+            return fromSyncthing;
 
         // The exe is normally distributed inside the replicated share itself, either at
         // its root or one level down (\App). Recognising both means a teammate can run

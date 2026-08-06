@@ -36,9 +36,12 @@ public partial class PeersWindow : Window
 
         if (status.State != SyncthingState.Running)
         {
-            StatusHeadline.Text = status.State == SyncthingState.NotInstalled
-                ? "Syncthing is not set up on this machine"
-                : "Syncthing is not running";
+            StatusHeadline.Text = status.State switch
+            {
+                SyncthingState.NotInstalled => "Syncthing is not set up on this machine",
+                SyncthingState.Unauthorized => "Syncthing is running but will not let this app in",
+                _ => "Syncthing is not running"
+            };
             StatusDetail.Text = status.Detail ?? "";
             MyDeviceId.Text = "—";
             PendingList.ItemsSource = null;

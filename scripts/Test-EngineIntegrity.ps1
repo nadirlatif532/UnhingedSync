@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Detects an internally inconsistent Unreal Engine install before a build wastes

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -7,7 +8,7 @@ using System.Xml.Linq;
 
 namespace UnhingedSync.Services;
 
-public enum SyncthingState { NotInstalled, NotRunning, Running }
+public enum SyncthingState { NotInstalled, NotRunning, Unauthorized, Running }
 
 public sealed record SyncthingStatus(SyncthingState State, string? DeviceId, string? Detail);
 
@@ -58,6 +59,41 @@ public sealed class SyncthingClient
         }
     }
 
+    /// <summary>
+    /// Where Syncthing itself says a folder lives, read straight from config.xml with no
+    /// REST call and no running daemon required.
+    ///
+    /// This exists because the app and Syncthing used to choose the share independently:
+    /// the app fell back to a default under the user profile while Syncthing replicated
+    /// somewhere else entirely, and the only symptom was an empty build list. Whatever
+    /// Syncthing is actually replicating is the authority on where the share is.
+    /// </summary>
+    public static string? TryGetFolderPathFromConfig(string folderId)
+    {
+        if (string.IsNullOrWhiteSpace(folderId)) return null;
+
+        var configPath = LocateConfig();
+        if (configPath is null) return null;
+
+        try
+        {
+            foreach (var folder in XDocument.Load(configPath).Root?.Elements("folder")
+                                  ?? Enumerable.Empty<XElement>())
+            {
+                if (folder.Attribute("id")?.Value == folderId)
+                {
+                    var path = folder.Attribute("path")?.Value;
+                    return string.IsNullOrWhiteSpace(path) ? null : path;
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or System.Xml.XmlException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+        return null;
+    }
+
     private static string? LocateConfig()
     {
         foreach (var root in new[]
@@ -86,10 +122,20 @@ public sealed class SyncthingClient
             var id = status?["myID"]?.GetValue<string>();
             return new(SyncthingState.Running, id, null);
         }
+        catch (HttpRequestException e) when (e.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+        {
+            // Syncthing answered, it just rejected our key. Telling someone to "start it"
+            // here sends them chasing a process that is already running.
+            return new(SyncthingState.Unauthorized, null,
+                $"Syncthing is running but rejected the API key read from {ConfigPath}. " +
+                "That usually means it is running with a different config directory than " +
+                "the one this app found. Open the Syncthing UI to confirm which one is live.");
+        }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
             return new(SyncthingState.NotRunning, null,
-                "Syncthing is installed but not responding. Start it and try again.");
+                $"Nothing is answering at {_baseUri}. Start Syncthing and try again. If it is " +
+                "already running, it may be using a different GUI address than its config states.");
         }
     }
 

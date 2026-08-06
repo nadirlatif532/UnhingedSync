@@ -68,6 +68,14 @@ public partial class MainWindow : Window
             t.Tag is string path &&
             path.Equals(projectRoot, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Bypasses both the four-hour throttle and the "don't ask about this version again"
+    /// flag, and reports the up-to-date case. Without this, declining an update once meant
+    /// never being offered that version again with no way to change your mind.
+    /// </summary>
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) =>
+        await UpdateChecker.CheckAsync(this, manual: true);
+
     private async void AddProject_Click(object sender, RoutedEventArgs e)
     {
         if (ProjectPicker.Pick(this) is not { } projectRoot) return;

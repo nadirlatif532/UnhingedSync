@@ -21,8 +21,33 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      # The tag is the single source of truth for the version. Left to the csproj, a
+      # forgotten bump ships a v1.1.0 release whose exe still reports 1.0.0, and every
+      # teammate is offered the same update forever because installing it never changes
+      # what they report.
+      - name: Derive version from tag
+        id: version
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag '${{ github.ref_name }}' is not vMAJOR.MINOR.PATCH" }
+          "value=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Building version $v"
+
       - name: Publish self-contained exe
-        run: dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
+        run: >
+          dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
+          -p:Version=${{ steps.version.outputs.value }}
+
+      # Guards against the failure this whole step exists to prevent: if the built exe
+      # does not report the tagged version, the release is wrong and must not ship.
+      - name: Verify stamped version
+        shell: pwsh
+        run: |
+          $actual = (Get-Item dist/UnhingedSync.exe).VersionInfo.FileVersion
+          $want = "${{ steps.version.outputs.value }}"
+          Write-Host "exe reports $actual, tag says $want"
+          if (-not $actual.StartsWith($want)) { throw "Version mismatch: exe=$actual tag=$want" }
 
       - name: Zip
         shell: pwsh

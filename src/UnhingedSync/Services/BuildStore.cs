@@ -82,19 +82,72 @@ public sealed class BuildStore(AppConfig config)
         string.IsNullOrEmpty(record.LogName) ? null : Path.Combine(_root, record.LogName);
 
     /// <summary>
-    /// Deletes a build's zip and log from the publish root, freeing space for the whole
-    /// team -- this folder is replicated by Syncthing, so the deletion propagates to
-    /// every peer, the same as the build script's own retention pass. The record file is
-    /// left alone; every reader already treats "success record, zip missing" as expired,
-    /// so nothing else needs to change for the deletion to show up correctly everywhere.
+    /// Deletes a build's zip and logs from the publish root. On a send-receive folder this
+    /// frees space for the whole team, the same as the build script's retention pass; on a
+    /// receive-only folder Syncthing will not propagate it, which is why callers must check
+    /// the folder type before offering this.
+    ///
+    /// The record file is deliberately left alone: every reader already treats "success
+    /// record, zip missing" as expired, and rewriting another machine's record is exactly
+    /// what would produce sync-conflict copies.
+    ///
+    /// Returns null on success, or a reason. It never throws -- a zip held open by
+    /// Syncthing mid-transfer is ordinary, and it used to take the whole app down with it
+    /// partway through a multi-build delete.
     /// </summary>
-    public void DeletePayload(BuildRecord record)
+    public string? DeletePayload(BuildRecord record)
     {
-        var zip = ZipPathFor(record);
-        if (zip is not null && File.Exists(zip)) File.Delete(zip);
+        var failures = new List<string>();
 
-        var log = LogPathFor(record);
-        if (log is not null && File.Exists(log)) File.Delete(log);
+        void TryDelete(string path)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {e.Message}");
+            }
+        }
+
+        if (ZipPathFor(record) is { } zip) TryDelete(zip);
+
+        // Logs are named per machine, so a commit two people built has two of them. The
+        // record we hold is only one of those, and retention sweeps them all -- matching
+        // that here stops the other machine's log being orphaned forever, since no later
+        // retention pass revisits a commit whose zip is already gone.
+        var stem = string.IsNullOrEmpty(record.CommitShort)
+            ? record.CommitOrdinal.ToString()
+            : record.CommitShort;
+
+        if (Directory.Exists(LogsDir))
+        {
+            try
+            {
+                foreach (var log in Directory.EnumerateFiles(LogsDir, $"{stem}-*.log")) TryDelete(log);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                failures.Add($"logs: {e.Message}");
+            }
+        }
+        if (LogPathFor(record) is { } exact) TryDelete(exact);
+
+        return failures.Count == 0 ? null : string.Join("; ", failures);
+    }
+
+    /// <summary>Actual size on disk, for when a record's recorded size is missing or stale.</summary>
+    public long ActualZipBytes(BuildRecord record)
+    {
+        try
+        {
+            return ZipPathFor(record) is { } zip && File.Exists(zip) ? new FileInfo(zip).Length : 0;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>Another machine currently building this commit, if any.</summary>

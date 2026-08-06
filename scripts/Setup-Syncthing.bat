@@ -25,6 +25,12 @@ if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" (
     set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
     goto :havepwsh
 )
+rem The per-user App Execution Alias, which is where a winget --scope user install lands.
+rem PATH in an already-open console will not have it yet, so probe the path directly.
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" (
+    set "PS=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
+    goto :havepwsh
+)
 
 echo.
 echo   PowerShell 7 is required and was not found on this machine.
@@ -57,6 +63,10 @@ if not errorlevel 1 (
 )
 if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" (
     set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    goto :havepwsh
+)
+if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe" (
+    set "PS=%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe"
     goto :havepwsh
 )
 

@@ -44,19 +44,25 @@ public static class PowerShellLocator
     public static bool IsAvailable => Find() is not null;
 
     /// <summary>
-    /// Runs winget to install PowerShell 7 and waits for it to finish. Returns whether
-    /// pwsh can actually be found afterwards -- winget can exit 0 while PATH in this
-    /// process is still stale, so success is judged by looking on disk, not the exit code.
+    /// Runs winget to install PowerShell 7. Returns whether pwsh can actually be found
+    /// afterwards -- winget exits non-zero for "already installed", so success is judged
+    /// by looking on disk, not by the exit code.
     /// </summary>
-    public static async Task<bool> InstallAsync()
+    public static async Task<bool> InstallAsync(CancellationToken ct = default)
     {
+        // The output streams are deliberately NOT redirected. Nothing here reads them,
+        // and a redirected stream nobody drains deadlocks the child the moment it fills
+        // the ~4 KB pipe buffer -- which winget's download progress does immediately.
+        // Success is judged by Find() below, so the output has no value to capture.
+        //
+        // --disable-interactivity matters just as much: this runs with CreateNoWindow, so
+        // the child has no console. Any prompt winget decided to show would be waiting on
+        // input that cannot arrive, and the app would hang with nothing on screen.
         var psi = new ProcessStartInfo("winget",
-            "install --id Microsoft.PowerShell --source winget " +
-            "--accept-package-agreements --accept-source-agreements -e")
+            "install --id Microsoft.PowerShell --source winget --exact --silent " +
+            "--accept-package-agreements --accept-source-agreements --disable-interactivity")
         {
             UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
             CreateNoWindow = true
         };
 
@@ -69,7 +75,20 @@ public static class PowerShellLocator
 
         using (proc)
         {
-            await proc.WaitForExitAsync();
+            // A bounded wait, so a winget that stalls on a network or an elevation prompt
+            // we cannot see becomes a clear failure rather than an app that never opens.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeout.CancelAfter(TimeSpan.FromMinutes(10));
+
+            try
+            {
+                await proc.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+                return false;
+            }
         }
 
         return Find() is not null;

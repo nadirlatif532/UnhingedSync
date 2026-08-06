@@ -1,8 +1,8 @@
 <Window x:Class="UnhingedSync.ManageBinariesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Manage Binaries" Height="560" Width="700"
-        MinHeight="420" MinWidth="560"
+        Title="Manage Binaries" Height="580" Width="720"
+        MinHeight="440" MinWidth="580"
         Background="{StaticResource Bg}"
         WindowStartupLocation="CenterOwner">
 
@@ -14,14 +14,15 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <!-- ── warning ────────────────────────────────────────────── -->
-    <Border Grid.Row="0" CornerRadius="6" Padding="14,11" Margin="0,0,0,12"
-            Background="#352C18" BorderBrush="#7A6229" BorderThickness="1">
-      <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Text}">
-        This folder is replicated by Syncthing. Deleting a build here removes it for
-        <Run FontWeight="SemiBold">everyone on the team</Run>, not just this machine —
-        the same thing that happens automatically after every publish, just on demand.
-      </TextBlock>
+    <!-- ── what deleting here actually does; filled in once the role is known ── -->
+    <Border Grid.Row="0" x:Name="ScopeBanner" CornerRadius="6" Padding="14,11" Margin="0,0,0,12"
+            Background="#20242A" BorderBrush="{StaticResource Border}" BorderThickness="1">
+      <StackPanel>
+        <TextBlock x:Name="ScopeHeadline" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Text="Checking what this machine is allowed to do…" />
+        <TextBlock x:Name="ScopeDetail" Foreground="{StaticResource TextDim}"
+                   TextWrapping="Wrap" Margin="0,4,0,0" />
+      </StackPanel>
     </Border>
 
     <!-- ── actions ────────────────────────────────────────────── -->
@@ -35,10 +36,12 @@
       <StackPanel Grid.Column="0" Orientation="Horizontal">
         <Button Content="Select All" Click="SelectAll_Click" />
         <Button Content="Select None" Click="SelectNone_Click" />
+        <Button Content="Refresh" Click="Refresh_Click"
+                ToolTip="Re-read the folder. Teammates publish into it and retention prunes it, so a window left open goes stale." />
       </StackPanel>
 
       <StackPanel Grid.Column="2" Orientation="Horizontal">
-        <Button x:Name="KeepLastButton" Content="Clean Up — Keep Newest N" Click="KeepLast_Click" />
+        <Button x:Name="KeepLastButton" Content="Clean Up" Click="KeepLast_Click" IsEnabled="False" />
         <Button x:Name="DeleteButton" Content="Delete Selected" Click="DeleteSelected_Click"
                 IsEnabled="False" Margin="0" />
       </StackPanel>
@@ -47,12 +50,12 @@
     <!-- ── list ───────────────────────────────────────────────── -->
     <Border Grid.Row="2" Background="{StaticResource Panel}" CornerRadius="6"
             BorderBrush="{StaticResource Border}" BorderThickness="1">
-      <DataGrid x:Name="Rows" AutoGenerateColumns="False" IsReadOnly="False"
+      <DataGrid x:Name="Rows" AutoGenerateColumns="False" IsReadOnly="True"
                 HeadersVisibility="Column" GridLinesVisibility="None"
                 Background="Transparent" BorderThickness="0"
                 RowBackground="Transparent" AlternatingRowBackground="#1A1A1E"
                 Foreground="{StaticResource Text}"
-                SelectionMode="Extended" CanUserResizeRows="False"
+                SelectionMode="Single" CanUserResizeRows="False"
                 VerticalScrollBarVisibility="Auto"
                 RowHeight="30" Margin="2">
 
@@ -70,16 +73,29 @@
 
         <DataGrid.RowStyle>
           <Style TargetType="DataGridRow">
+            <Setter Property="ToolTip" Value="{Binding Tooltip}" />
             <Setter Property="Foreground" Value="{StaticResource Text}" />
           </Style>
         </DataGrid.RowStyle>
 
         <DataGrid.Columns>
-          <DataGridCheckBoxColumn Header="" Width="34" Binding="{Binding IsSelected, Mode=TwoWay}" />
-          <DataGridTextColumn Header="COMMIT" Binding="{Binding CommitLabel}" Width="80" IsReadOnly="True" />
-          <DataGridTextColumn Header="SIZE" Binding="{Binding SizeText}" Width="90" IsReadOnly="True" />
-          <DataGridTextColumn Header="BUILT" Binding="{Binding BuiltText}" Width="140" IsReadOnly="True" />
-          <DataGridTextColumn Header="BUILT BY" Binding="{Binding BuiltBy}" Width="*" IsReadOnly="True" />
+          <!-- A template column, not DataGridCheckBoxColumn: on a read-only grid the
+               built-in one needs a click to focus the cell and a second to toggle. -->
+          <DataGridTemplateColumn Header="" Width="36">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                          IsEnabled="{Binding DataContext.CanDelete, RelativeSource={RelativeSource AncestorType=Window}}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center" />
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
+
+          <DataGridTextColumn Header="COMMIT" Binding="{Binding CommitLabel}" Width="80" />
+          <DataGridTextColumn Header="SIZE" Binding="{Binding SizeText}" Width="90" />
+          <DataGridTextColumn Header="STATE" Binding="{Binding StateText}" Width="90" />
+          <DataGridTextColumn Header="BUILT" Binding="{Binding BuiltText}" Width="130" />
+          <DataGridTextColumn Header="BUILT BY" Binding="{Binding BuiltBy}" Width="*" />
         </DataGrid.Columns>
       </DataGrid>
     </Border>

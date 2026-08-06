@@ -24,6 +24,8 @@
                  Foreground="{StaticResource TextDim}" VerticalAlignment="Center" />
 
       <StackPanel Grid.Column="2" Orientation="Horizontal">
+        <Button Content="Check for updates" Click="CheckUpdates_Click"
+                ToolTip="Ask GitHub for a newer release now, instead of waiting for the next automatic check." />
         <Button Content="Add project…" Click="AddProject_Click"
                 ToolTip="Open another Unreal project in its own tab." />
         <Button Content="Close project" Click="CloseProject_Click" Margin="0"

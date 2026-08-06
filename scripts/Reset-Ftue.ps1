@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Resets this machine's Unhinged Sync setup so the first-run experience can be
@@ -136,8 +137,27 @@ if (Test-Path -LiteralPath $LocalConfig) {
 
 if (Test-Path -LiteralPath $ScriptCache) {
     # Regenerated from inside the exe on next launch; clearing it proves that works.
-    Remove-Item -LiteralPath $ScriptCache -Recurse -Force
-    Write-Ok 'Cleared the extracted script cache'
+    #
+    # Careful: this script is itself embedded in the exe, so it may well be RUNNING from
+    # the very folder being deleted. Deleting the file out from under the interpreter is
+    # asking for trouble, so leave our own copy behind and let the next launch overwrite
+    # it, which it does unconditionally.
+    $selfDir = $null
+    if ($PSCommandPath) { $selfDir = Split-Path -Parent $PSCommandPath }
+
+    $runningFromCache = $selfDir -and (
+        [System.IO.Path]::GetFullPath($selfDir).TrimEnd('\') -like
+        ([System.IO.Path]::GetFullPath($ScriptCache).TrimEnd('\') + '*'))
+
+    if ($runningFromCache) {
+        Get-ChildItem -LiteralPath $ScriptCache -Recurse -Force -File |
+            Where-Object { $_.FullName -ne $PSCommandPath } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Ok 'Cleared the extracted script cache (kept this script, which is in use)'
+    } else {
+        Remove-Item -LiteralPath $ScriptCache -Recurse -Force
+        Write-Ok 'Cleared the extracted script cache'
+    }
 }
 
 if ($IncludeProjectConfig) {

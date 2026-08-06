@@ -18,9 +18,12 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
 
-    <!-- Shown in the UI and used to name the extracted script cache, so a stale copy
-         of the app is visible rather than mysterious. Bump on release. -->
-    <Version>1.0.0</Version>
+    <!-- Shown in the UI, used to name the extracted script cache, and compared against
+         the newest GitHub release by the updater. A release build overrides this from the
+         git tag (see .github/workflows/release.yml), so this value is what local builds
+         report; keep it in step with the last tag so a dev build is not mistaken for a
+         released one. -->
+    <Version>1.1.0</Version>
   </PropertyGroup>
 
   <!-- The scripts travel INSIDE the exe. That makes the zip a single file, and makes it

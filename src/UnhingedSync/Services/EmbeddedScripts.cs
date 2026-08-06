@@ -25,6 +25,7 @@ public static class EmbeddedScripts
     public static string EngineIntegrityScript => Path.Combine(CacheDir.Value, "Test-EngineIntegrity.ps1");
     public static string SetupScript => Path.Combine(CacheDir.Value, "Setup-Syncthing.ps1");
     public static string SetupBat => Path.Combine(CacheDir.Value, "Setup-Syncthing.bat");
+    public static string ResetFtueScript => Path.Combine(CacheDir.Value, "Reset-Ftue.ps1");
 
     /// <summary>Where the scripts were extracted. Useful in diagnostics.</summary>
     public static string Directory => CacheDir.Value;
@@ -67,7 +68,8 @@ public static class EmbeddedScripts
     public static IReadOnlyList<string> Missing()
     {
         var missing = new List<string>();
-        foreach (var path in new[] { BuildScript, EngineIntegrityScript, SetupScript, SetupBat })
+        foreach (var path in new[]
+                 { BuildScript, EngineIntegrityScript, SetupScript, SetupBat, ResetFtueScript })
         {
             if (!File.Exists(path)) missing.Add(Path.GetFileName(path));
         }
