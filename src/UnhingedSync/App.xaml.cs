@@ -69,6 +69,17 @@ public partial class App
 
         // Checks the bucket and token before anyone relies on them. Every way this can be
         // misconfigured otherwise surfaces as the same "no builds found".
+        // Compile and upload with no window, so a build box can run from a scheduled task
+        // through the same code path the button uses.
+        if (e.Args.Any(a => a.Equals("--build", StringComparison.OrdinalIgnoreCase)))
+        {
+            var buildPath = e.Args.SkipWhile(a => !a.Equals("--build", StringComparison.OrdinalIgnoreCase))
+                                  .Skip(1)
+                                  .FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+            Shutdown(await BuildCommand.RunAsync(buildPath));
+            return;
+        }
+
         if (e.Args.Any(a => a.Equals("--storagetest", StringComparison.OrdinalIgnoreCase)))
         {
             var storagePath = e.Args.SkipWhile(a => !a.Equals("--storagetest", StringComparison.OrdinalIgnoreCase))

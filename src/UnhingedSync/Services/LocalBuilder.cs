@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using UnhingedSync.Models;
@@ -79,18 +80,124 @@ public sealed class LocalBuilder(AppConfig config)
     }
 
     /// <summary>
-    /// Compiles and publishes the binaries. PDBs are produced by the compile as a
-    /// matter of course and stay on this machine -- they are never published, so a
-    /// local build is also how a programmer gets symbols they can actually debug with.
+    /// Compiles, then uploads what the compile produced.
+    ///
+    /// The script writes into a local staging folder and knows nothing about the bucket, so
+    /// no credential is ever passed to PowerShell, where it would show up in the process
+    /// command line for any local process to read. The staging layout is already identical to
+    /// the bucket's key layout -- zip at the root, records/, logs/ -- so uploading is a
+    /// straight copy with relative paths as keys, and nothing had to be redesigned.
+    ///
+    /// Two properties worth keeping in mind. A failed upload no longer destroys a thirty
+    /// minute compile: the artifacts stay in staging and the path is reported, so it can be
+    /// retried. And a failed build still uploads, because its record and compiler log are how
+    /// the rest of the team sees a red badge and finds out why.
+    ///
+    /// PDBs are produced by the compile as a matter of course and stay on this machine. They
+    /// are never uploaded, so a local build is also how a programmer gets debuggable symbols.
     /// </summary>
-    public Task<LocalBuildResult> BuildAndPublishAsync(
+    public async Task<LocalBuildResult> BuildAndPublishAsync(
+        BuildStore store,
+        string commitShort,
         IProgress<string> log,
         CancellationToken ct = default)
-        // Both paths are essential, not decorative: the script runs from an extracted
-        // cache folder, so it can infer neither the project nor the share on its own.
-        => RunScriptAsync(
-            ["-NoSync", "-Publish", "-ProjectRoot", config.ProjectRoot, "-PublishRoot", config.PublishRoot],
-            log, ct);
+    {
+        var staging = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "UnhingedSync", "staging", Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(staging);
+
+        var claimed = false;
+        try
+        {
+            // Tells everyone else not to spend half an hour producing the same zip. Best
+            // effort still: if it fails, a duplicate build is wasteful and harmless.
+            try
+            {
+                await store.WriteClaimAsync(commitShort, ct);
+                claimed = true;
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException
+                                         or Amazon.S3.AmazonS3Exception)
+            {
+                log.Report("Could not record a build claim, so someone else may duplicate this build.");
+            }
+
+            // Both paths are essential, not decorative: the script runs from an extracted
+            // cache folder, so it can infer neither the project nor where to stage output.
+            var result = await RunScriptAsync(
+                ["-NoSync", "-Publish", "-ProjectRoot", config.ProjectRoot, "-PublishRoot", staging],
+                log, ct);
+
+            var uploaded = await UploadStagingAsync(store, staging, commitShort, result.Succeeded, log, ct);
+            if (uploaded is not null)
+            {
+                log.Report($"The build finished but uploading failed: {uploaded}");
+                log.Report($"Nothing was lost. The files are still in {staging} and can be retried.");
+                return result with { Succeeded = false, RawOutput = result.RawOutput + "\n" + uploaded };
+            }
+
+            try { Directory.Delete(staging, recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+
+            return result;
+        }
+        finally
+        {
+            if (claimed)
+            {
+                try { await store.RemoveClaimAsync(commitShort, CancellationToken.None); }
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException
+                                             or Amazon.S3.AmazonS3Exception)
+                {
+                    // The lifecycle rule on claims/ expires it within a day regardless.
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Uploads everything the build staged. Returns null on success, or a reason.
+    /// </summary>
+    private static async Task<string?> UploadStagingAsync(
+        BuildStore store, string staging, string commitShort, bool succeeded,
+        IProgress<string> log, CancellationToken ct)
+    {
+        if (!Directory.Exists(staging)) return "the build produced no output to upload.";
+
+        var files = Directory.EnumerateFiles(staging, "*", SearchOption.AllDirectories).ToList();
+        if (files.Count == 0) return "the build produced no output to upload.";
+
+        var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in files)
+        {
+            var key = Path.GetRelativePath(staging, file).Replace(Path.DirectorySeparatorChar, '/');
+
+            // The script writes a claim of its own beside the payload, which is meaningless
+            // in a staging folder and would collide with the real one written above.
+            if (key.StartsWith("claims/", StringComparison.OrdinalIgnoreCase)) continue;
+
+            try
+            {
+                await store.PutStagedFileAsync(key, file, log, ct);
+                written.Add(key);
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException
+                                         or Amazon.S3.AmazonS3Exception or IOException)
+            {
+                return $"{key}: {e.Message}";
+            }
+        }
+
+        log.Report($"Uploaded {written.Count} file(s) to {store.Description}.");
+
+        // Leaves exactly one record and one log per commit. Success only: a failed build must
+        // never delete the record of a working one.
+        if (succeeded) await store.PruneSupersededAsync(commitShort, written, ct);
+
+        return null;
+    }
 
     private async Task<LocalBuildResult> RunScriptAsync(
         string[] scriptArgs,

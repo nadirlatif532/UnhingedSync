@@ -13,6 +13,9 @@ public sealed class CommitRowViewModel
     public bool IsInstalled { get; init; }
     public string? ClaimedBy { get; init; }
 
+    /// <summary>How long ago that build started, so a stale claim is recognisable.</summary>
+    public string? ClaimAge { get; init; }
+
     public string CommitLabel => Commit.Ordinal > 0 ? $"#{Commit.Ordinal}" : Commit.CommitId;
 
     // Sort keys, because the displayed values sort wrongly. "#9" beats "#52"
@@ -103,7 +106,10 @@ public sealed class CommitRowViewModel
                 if (!string.IsNullOrEmpty(Record.EngineVersion))
                     lines.Add($"Engine {Record.EngineVersion} (BuildId {Record.EngineBuildId})");
             }
-            if (ClaimedBy is not null) lines.Add($"{ClaimedBy} is building this now");
+            if (ClaimedBy is not null)
+                lines.Add(ClaimAge is null
+                    ? $"{ClaimedBy} is building this now"
+                    : $"{ClaimedBy} started building this {ClaimAge}. Build Locally ignores claims.");
             return string.Join('\n', lines);
         }
     }

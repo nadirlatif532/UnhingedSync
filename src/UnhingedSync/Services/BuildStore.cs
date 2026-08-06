@@ -22,6 +22,23 @@ namespace UnhingedSync.Services;
 /// former as "expired" because Syncthing downloads under a temporary name. A listing answers
 /// the question exactly, so the "syncing" state is gone entirely.
 /// </summary>
+/// <summary>
+/// Somebody else building a commit right now. The age matters as much as the machine name:
+/// a claim four minutes old means wait, and one eighty minutes old probably means their
+/// machine died, and the user needs to be able to tell those apart.
+/// </summary>
+public sealed record ClaimInfo(string Machine, TimeSpan Age)
+{
+    public string Describe => Age.TotalMinutes < 1
+        ? "just now"
+        : Age.TotalMinutes < 90
+            ? $"{(int)Age.TotalMinutes} minute(s) ago"
+            : $"{(int)Age.TotalHours} hour(s) ago";
+
+    /// <summary>Old enough that a crashed build is the likelier explanation.</summary>
+    public bool LooksStale => Age > TimeSpan.FromMinutes(45);
+}
+
 public sealed class BuildStore : IDisposable
 {
     private readonly AppConfig _config;
@@ -278,10 +295,10 @@ public sealed class BuildStore : IDisposable
     /// so painting sixty commits meant sixty listings, which was tolerable against a local
     /// folder and is not against a bucket.
     /// </summary>
-    public async Task<Dictionary<string, string>> ActiveClaimsAsync(
+    public async Task<Dictionary<string, ClaimInfo>> ActiveClaimsAsync(
         TimeSpan maxAge, CancellationToken ct = default)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, ClaimInfo>(StringComparer.OrdinalIgnoreCase);
         if (_remote is null) return result;
 
         List<RemoteObject> claims;
@@ -295,7 +312,10 @@ public sealed class BuildStore : IDisposable
         var mine = Environment.MachineName;
         foreach (var claim in claims)
         {
-            if (claim.LastModified is { } when && DateTimeOffset.UtcNow - when > maxAge) continue;
+            var age = claim.LastModified is { } when
+                ? DateTimeOffset.UtcNow - when
+                : TimeSpan.Zero;
+            if (age > maxAge) continue;
 
             var name = Path.GetFileNameWithoutExtension(claim.Key);
             var dash = name.IndexOf('-');
@@ -305,7 +325,7 @@ public sealed class BuildStore : IDisposable
             var machine = name[(dash + 1)..];
             if (machine.Equals(mine, StringComparison.OrdinalIgnoreCase)) continue;
 
-            result[stem] = machine;
+            result[stem] = new ClaimInfo(machine, age);
         }
         return result;
     }
@@ -319,12 +339,53 @@ public sealed class BuildStore : IDisposable
 
     // ---------------------------------------------------------------- publishing
 
-    public Task PutZipAsync(
-        string zipName, string localPath, IProgress<string>? log = null, CancellationToken ct = default) =>
-        Remote.PutFileAsync(zipName, localPath, log, ct);
+    /// <summary>Uploads one staged artifact, whatever kind it is.</summary>
+    public Task PutStagedFileAsync(
+        string key, string localPath, IProgress<string>? log = null, CancellationToken ct = default) =>
+        Remote.PutFileAsync(key, localPath, log, ct);
 
     public Task PutTextAsync(string key, string content, CancellationToken ct = default) =>
         Remote.PutTextAsync(key, content, ct);
+
+    /// <summary>
+    /// After a successful publish, removes other machines' records and logs for the same
+    /// commit so there is exactly one of each per commit.
+    ///
+    /// The zip never needed this: its key carries no machine name, so a second build of a
+    /// commit overwrites the first and there has only ever been one binary per commit. The
+    /// metadata was per machine solely because Syncthing produced sync-conflict copies when
+    /// two machines wrote one file, and a single consistent store has no such problem.
+    ///
+    /// Only ever called on success, and that restriction is the point: a failed build must not
+    /// be able to delete the record of a working one and make a good build look broken.
+    /// </summary>
+    public async Task PruneSupersededAsync(
+        string commitShort, IReadOnlySet<string> keep, CancellationToken ct = default)
+    {
+        var stem = new string((commitShort ?? "").Where(char.IsLetterOrDigit).ToArray());
+        if (stem.Length == 0 || _remote is null) return;
+
+        foreach (var prefix in new[] { $"records/{stem}-", $"logs/{stem}-" })
+        {
+            List<RemoteObject> existing;
+            try { existing = await Remote.ListAsync(prefix, ct); }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException
+                                         or Amazon.S3.AmazonS3Exception)
+            {
+                continue;
+            }
+
+            foreach (var stale in existing.Where(o => !keep.Contains(o.Key)))
+            {
+                try { await Remote.DeleteAsync(stale.Key, ct); }
+                catch (Exception e) when (e is HttpRequestException or TaskCanceledException
+                                             or Amazon.S3.AmazonS3Exception)
+                {
+                    // Leftover metadata is untidy, never incorrect: readers group by commit.
+                }
+            }
+        }
+    }
 
     // ---------------------------------------------------------------- deleting
 

@@ -131,7 +131,14 @@ public sealed class ObjectStore : IDisposable
             BucketName = _config.Bucket,
             Key = Key(relativeKey),
             InputStream = stream,
-            ContentType = "application/zip",
+            ContentType = Path.GetExtension(localPath).ToLowerInvariant() switch
+            {
+                ".zip" => "application/zip",
+                ".json" => "application/json",
+                _ => "text/plain"
+            },
+
+            // Required for R2 on every write; see PutTextAsync.
             DisablePayloadSigning = true
         }, ct);
     }

@@ -293,15 +293,31 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private async Task ExplainMissingBinariesAsync()
     {
         var commitShort = WorkspaceCommit.Replace("dv.commit.", "");
-        var otherMachine = await _store.ActiveClaimByAsync(commitShort, ClaimMaxAge);
+        var claims = await _store.ActiveClaimsAsync(ClaimMaxAge);
 
-        if (otherMachine is not null)
+        if (claims.TryGetValue(commitShort, out var claim))
         {
-            _log.Report($"{otherMachine} is building this commit right now. Waiting is usually faster " +
-                        "than building it again. Press Refresh in a few minutes.");
+            // The age is the whole point. A claim minutes old means wait; one over three
+            // quarters of an hour usually means that machine died mid-build, and the user
+            // needs to know they are allowed to ignore it rather than sit there.
+            var stale = claim.LooksStale
+                ? $"\n\nThat started {claim.Describe}, which is long enough that their build may " +
+                  "have died. Nothing is stopping you: Build Locally ignores claims entirely, and " +
+                  "a claim this old is discarded automatically after 90 minutes."
+                : "";
+
+            _log.Report($"{claim.Machine} started building this {claim.Describe}. " +
+                        "Waiting is usually faster than building it again.");
+
             SetStatus(StatusKind.Warning,
-                $"{otherMachine} is building {WorkspaceCommit}",
-                "Press Refresh once they finish, then press Sync & Ensure Binaries again.");
+                $"{claim.Machine} is building {WorkspaceCommit} (started {claim.Describe})",
+                "Press Refresh once they finish. If their build died, press Build Locally, which " +
+                "ignores claims.");
+
+            MessageBox.Show(
+                $"{claim.Machine} started building {WorkspaceCommit} {claim.Describe}.\n\n" +
+                "Waiting for them is usually faster than compiling it again." + stale,
+                "Someone is already building this", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -411,7 +427,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         await RunAsync("Building locally…", async () =>
         {
             _log.Report($"── Local build of {WorkspaceCommit} ──");
-            var result = await _builder.BuildAndPublishAsync(_log);
+            var result = await _builder.BuildAndPublishAsync(
+                _store, WorkspaceCommit.Replace("dv.commit.", ""), _log);
 
             if (!result.Succeeded)
             {
@@ -561,7 +578,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var commits = await _dv.GetLogAsync(60);
 
         Dictionary<string, BuildRecord> records;
-        Dictionary<string, string> claims;
+        Dictionary<string, ClaimInfo> claims;
         try
         {
             records = (await _store.ReadAllAsync()).ToDictionary(r => r.CommitId);
@@ -580,7 +597,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         foreach (var commit in commits)
         {
             records.TryGetValue(commit.CommitId, out var record);
-            claims.TryGetValue(commit.Ordinal.ToString(), out var claimedBy);
+            claims.TryGetValue(commit.Ordinal.ToString(), out var claim);
 
             Rows.Add(new CommitRowViewModel
             {
@@ -588,7 +605,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 Record = record,
                 IsWorkspace = commit.CommitId == WorkspaceCommit,
                 IsInstalled = commit.CommitId == _installedCommit,
-                ClaimedBy = claimedBy
+                ClaimedBy = claim?.Machine,
+                ClaimAge = claim?.Describe
             });
         }
 

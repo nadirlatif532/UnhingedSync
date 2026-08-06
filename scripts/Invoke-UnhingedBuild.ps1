@@ -892,7 +892,14 @@ try {
         $recordPath = Write-BuildRecord -Root $PublishRootResolved -Record $record
         Write-Step "Record written: $([System.IO.Path]::GetFileName($recordPath))"
 
-        Invoke-Retention -Root $PublishRootResolved -Keep ([int] $Config.retainBuilds)
+        # Retention deliberately does NOT run here any more.
+        #
+        # Two reasons. The publish root is now a local staging folder that the app uploads
+        # from and then deletes, so pruning it would prune nothing useful. And when this did
+        # run against the shared folder it could delete the zip a teammate was midway through
+        # downloading, stranding them on a commit with no payload and no way to get one.
+        # Routine cleanup is a 30 day lifecycle rule on the bucket, which cannot race anybody,
+        # and "keep newest N" remains available on demand in Manage Binaries.
     }
 } finally {
     # Release our claim on every path out of here: success, build failure, or a
