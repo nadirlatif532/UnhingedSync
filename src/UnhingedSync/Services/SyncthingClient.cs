@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -51,9 +52,81 @@ public sealed class SyncthingClient
                 // 0.0.0.0 means "all interfaces"; we always talk to it locally.
                 _baseUri = "http://" + address.Replace("0.0.0.0", "127.0.0.1");
             }
+
+            // A key set here wins over config.xml, which is the escape hatch when the two
+            // have diverged (see FindLiveEndpointAsync) and the app cannot authenticate.
+            if (ConfigLoader.GetSyncthingApiKey() is { Length: > 0 } overrideKey) _apiKey = overrideKey;
+
             return !string.IsNullOrWhiteSpace(_apiKey);
         }
         catch (Exception e) when (e is IOException or System.Xml.XmlException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Finds the address Syncthing is really serving on, which is not always the one its
+    /// config.xml states.
+    ///
+    /// Observed on Syncthing 2.1.2: config.xml said 127.0.0.1:8384, nothing was listening
+    /// there, and the running daemon was serving on a completely different port while
+    /// rejecting the key from that same file. Version 2 keeps live state in a SQLite
+    /// database beside config.xml, so the XML can be left behind as a stale artifact.
+    /// Trusting it alone made the app report "Syncthing is not running" about a daemon
+    /// that was running perfectly well.
+    ///
+    /// /rest/noauth/health needs no API key, which is what makes this probe possible.
+    /// The loopback scan only runs when the configured address is dead AND a syncthing
+    /// process actually exists, so the normal case costs one request.
+    /// </summary>
+    private async Task<bool> FindLiveEndpointAsync(CancellationToken ct)
+    {
+        if (await IsHealthyAsync(_baseUri, ct)) return true;
+
+        try
+        {
+            if (System.Diagnostics.Process.GetProcessesByName("syncthing").Length == 0) return false;
+        }
+        catch (InvalidOperationException) { return false; }
+
+        var ports = new List<int>();
+        try
+        {
+            foreach (var listener in IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners())
+            {
+                if (IPAddress.IsLoopback(listener.Address) ||
+                    listener.Address.Equals(IPAddress.Any) ||
+                    listener.Address.Equals(IPAddress.IPv6Any))
+                    ports.Add(listener.Port);
+            }
+        }
+        catch (NetworkInformationException) { return false; }
+
+        // Probe concurrently with a short timeout; the first daemon that answers wins.
+        var candidates = ports.Distinct().Select(p => $"http://127.0.0.1:{p}").ToList();
+        var probes = candidates.Select(async uri => (uri, healthy: await IsHealthyAsync(uri, ct, 600))).ToList();
+
+        foreach (var (uri, healthy) in await Task.WhenAll(probes))
+        {
+            if (!healthy) continue;
+            _baseUri = uri;
+            return true;
+        }
+        return false;
+    }
+
+    private static async Task<bool> IsHealthyAsync(string baseUri, CancellationToken ct, int timeoutMs = 3000)
+    {
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(timeoutMs);
+            using var response = await Http.GetAsync($"{baseUri}/rest/noauth/health", cts.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or OperationCanceledException
+                                     or UriFormatException or InvalidOperationException)
         {
             return false;
         }
@@ -116,6 +189,10 @@ public sealed class SyncthingClient
             return new(SyncthingState.NotInstalled, null,
                 "Syncthing is not installed, or has never been started on this machine.");
 
+        // The address in config.xml is a hint, not a fact. Resolve the one it is actually
+        // serving on before deciding it is down.
+        var live = await FindLiveEndpointAsync(ct);
+
         try
         {
             var status = await GetAsync("system/status", ct);
@@ -127,15 +204,16 @@ public sealed class SyncthingClient
             // Syncthing answered, it just rejected our key. Telling someone to "start it"
             // here sends them chasing a process that is already running.
             return new(SyncthingState.Unauthorized, null,
-                $"Syncthing is running but rejected the API key read from {ConfigPath}. " +
-                "That usually means it is running with a different config directory than " +
-                "the one this app found. Open the Syncthing UI to confirm which one is live.");
+                $"Syncthing is running at {_baseUri} but rejected the API key from {ConfigPath}. " +
+                "Its live settings have diverged from that file. Open the Syncthing UI, copy the " +
+                "API key from Actions then Settings, and put it in config.local.json as " +
+                "\"syncthingApiKey\".");
         }
         catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
         {
-            return new(SyncthingState.NotRunning, null,
-                $"Nothing is answering at {_baseUri}. Start Syncthing and try again. If it is " +
-                "already running, it may be using a different GUI address than its config states.");
+            return new(SyncthingState.NotRunning, null, live
+                ? $"Syncthing answered at {_baseUri} but the status request failed. Try again."
+                : "Syncthing is not answering on any local port. Start it and try again.");
         }
     }
 

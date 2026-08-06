@@ -150,6 +150,14 @@ public static class ConfigLoader
     /// </summary>
     public static string GetPersistedPublishRoot() => ReadLocalOverrides()?.PublishRoot ?? "";
 
+    /// <summary>
+    /// An API key to use instead of the one in Syncthing's config.xml. Needed when a
+    /// Syncthing 2 install's live settings have diverged from that file, which leaves the
+    /// app authenticating with a key the daemon no longer accepts.
+    /// </summary>
+    public static string GetSyncthingApiKey() =>
+        ReadLocalJson()?["syncthingApiKey"]?.GetValue<string>() ?? "";
+
     /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
     public static bool GetDeclinedPowerShellInstall() =>
         ReadLocalJson()?["declinedPowerShellInstall"]?.GetValue<bool>() ?? false;
