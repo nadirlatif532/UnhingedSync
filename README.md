@@ -240,9 +240,10 @@ JSON report. Exit code 0 means everything passed.
 | Symptom | Likely cause |
 |---|---|
 | "Binary share not reachable" | Syncthing is not running, or the folder path does not exist. |
-| "This app and Syncthing disagree about where builds live" | Two different folders are in play. Fix `publishRoot` in `config.local.json`, or re-point the folder in Syncthing. |
+| "This app and Syncthing disagree about where builds live" | Two different folders are in play. Re-point the folder in Syncthing, or set `UNHINGEDSYNC_PUBLISH_ROOT`. Editing `config.local.json` will not help here, because Syncthing's own folder path deliberately wins over the saved value. |
 | The build list is empty but teammates see builds | Usually the same path disagreement, or Syncthing has not finished the first sync. |
-| "Syncthing is running but will not let this app in" | Syncthing is using a different config directory than the one the app found. Open the Syncthing UI to see which one is live. |
+| "Syncthing is running but will not let this app in" | Syncthing's live settings have diverged from its `config.xml`, so the API key the app read is rejected. Open the Syncthing UI, copy the key from Actions then Settings, and add it to `config.local.json` as `"syncthingApiKey"`. Restarting Syncthing often fixes it outright. |
+| "Cannot confirm what this machine is allowed to do" in Manage Binaries | Deleting stays disabled until Syncthing can confirm the folder is send-receive, because deleting on a receive-only share destroys your only copy and frees nothing for anyone. Start Syncthing and press Refresh. |
 | A red badge | Open **Build Log** for the actual compiler output. |
 | Compile fails with errors inside untouched engine headers | Run the engine integrity check below. |
 
@@ -323,10 +324,25 @@ Unreal **bans** some shipped MSVC versions outright. See `BannedVisualCppVersion
 ### Per machine, never committed
 
 `%LOCALAPPDATA%\UnhingedSync\config.local.json` holds the publish root, the known project
-list, this machine's role, the per project engine choice, and update check bookkeeping.
+list, this machine's role, the per project engine choice, update check bookkeeping, and an
+optional `syncthingApiKey`.
 
 Environment overrides, useful for scripting: `UNHINGEDSYNC_PROJECT_ROOT` and
 `UNHINGEDSYNC_PUBLISH_ROOT`.
+
+Where the shared folder lives is resolved in this order, and the order matters:
+
+1. `UNHINGEDSYNC_PUBLISH_ROOT`, which is the way to override deliberately.
+2. Syncthing's own path for the project's folder ID, read from its config.
+3. The value saved in `config.local.json`.
+4. The folder the executable is sitting in, if it looks like a share.
+5. `%USERPROFILE%\UnhingedShare`.
+
+Syncthing outranks the saved value on purpose. The saved value is not necessarily a choice
+anyone made, because the app writes back whatever it resolved on every startup. Checking it
+first meant a machine that once fell through to the default kept reading an empty folder
+while Syncthing replicated somewhere else, and the only symptom was a build list that stayed
+empty.
 
 ### The engine selector
 
