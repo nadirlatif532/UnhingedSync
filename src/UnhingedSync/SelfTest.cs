@@ -301,6 +301,22 @@ public static class SelfTest
         await File.WriteAllTextAsync(outputPath,
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
 
+        // Every other diagnostic mode prints; this one silently wrote a file and left the
+        // caller staring at nothing. A summary rather than the whole report, because this
+        // one is long, with the failures spelled out since those are the reason to run it.
+        Console.Error.WriteLine($"{results.Count - failures}/{results.Count} checks passed.");
+        foreach (var result in results)
+        {
+            var line = JsonSerializer.SerializeToElement(result);
+            if (line.TryGetProperty("ok", out var okValue) && !okValue.GetBoolean())
+            {
+                var name = line.TryGetProperty("check", out var c) ? c.GetString() : "?";
+                var detail = line.TryGetProperty("detail", out var d) ? d.ToString() : "";
+                Console.Error.WriteLine($"  FAILED  {name}: {detail}");
+            }
+        }
+        Console.Error.WriteLine($"Full report: {outputPath}");
+
         return failures == 0 ? 0 : 1;
     }
 }

@@ -109,7 +109,13 @@ public sealed class ObjectStore : IDisposable
             ContentBody = content,
             ContentType = relativeKey.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
                 ? "application/json"
-                : "text/plain"
+                : "text/plain",
+
+            // Required for R2, on every write. Signing the payload makes the SDK stream it
+            // with aws-chunked framing, which R2 does not implement and rejects with a bare
+            // 501 that looks like a permissions problem. Unsigned is not insecure here: the
+            // request is still SigV4-signed over its headers, and the body is inside TLS.
+            DisablePayloadSigning = true
         }, ct);
     }
 
@@ -255,8 +261,19 @@ public sealed class ObjectStore : IDisposable
         }
         catch (AmazonS3Exception e)
         {
-            return $"Reading works but writing does not ({(int)e.StatusCode} {e.StatusCode}). " +
-                   "The token needs Object Read and Write to publish builds.";
+            // Named separately, because assuming "write failed" means "not allowed to write"
+            // sent us both looking at the token when the request itself was at fault.
+            return e.StatusCode switch
+            {
+                System.Net.HttpStatusCode.Forbidden =>
+                    "Reading works but writing is refused. The token needs Object Read and " +
+                    "Write, not Object Read only.",
+                System.Net.HttpStatusCode.NotImplemented =>
+                    "Reading works but the store rejected the upload as unsupported (501). " +
+                    "That is a client bug rather than a problem with your token or bucket. " +
+                    $"Detail: {e.Message}",
+                _ => $"Reading works but writing failed with {(int)e.StatusCode} {e.StatusCode}: {e.Message}"
+            };
         }
 
         return null;

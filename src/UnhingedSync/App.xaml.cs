@@ -1,4 +1,5 @@
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
 using UnhingedSync.Services;
@@ -6,11 +7,44 @@ using Microsoft.Win32;
 
 namespace UnhingedSync;
 
-public partial class App : Application
+public partial class App
 {
+    private const uint AttachParentProcess = 0xFFFFFFFF;
+
+    // DllImport rather than LibraryImport: the source generator for the latter emits unsafe
+    // code, and enabling AllowUnsafeBlocks across the project to obtain one console handle
+    // is a poor trade.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachConsole(uint dwProcessId);
+
+    /// <summary>
+    /// Borrows the calling terminal's console so the headless modes can actually be read.
+    ///
+    /// This is a WinExe, which means Windows gives it no console, so every Console.Write in
+    /// the diagnostic modes went nowhere and the only way to see a result was to open the
+    /// JSON file it left in TEMP. Someone running --storagetest saw a silent exit and no
+    /// clue whether it had worked.
+    ///
+    /// Failure is normal and ignored: launched from Explorer there is no parent console to
+    /// attach to, and nothing wants one.
+    /// </summary>
+    private static void AttachToParentConsole()
+    {
+        if (!AttachConsole(AttachParentProcess)) return;
+
+        // Rebinding is needed because the streams were already bound to nothing. This also
+        // does the right thing when output is redirected to a file or a pipe.
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+        Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+    }
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Any switch means a diagnostic run, which is only useful if its output is visible.
+        if (e.Args.Any(a => a.StartsWith("--", StringComparison.Ordinal))) AttachToParentConsole();
 
         // Headless check of the whole service layer, so the plumbing can be verified
         // without a human driving the window.

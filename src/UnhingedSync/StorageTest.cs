@@ -52,7 +52,7 @@ public static class StorageTest
                     {
                         ok = false,
                         endpoint = storage.ResolvedEndpoint,
-                        storage.Bucket,
+                        bucket = storage.Bucket,
                         writeChecked = includeWrite,
                         reason = failure
                     };
@@ -67,7 +67,7 @@ public static class StorageTest
                     {
                         ok,
                         endpoint = storage.ResolvedEndpoint,
-                        storage.Bucket,
+                        bucket = storage.Bucket,
                         prefix = string.IsNullOrEmpty(storage.Prefix) ? "(none)" : storage.Prefix,
                         writeChecked = includeWrite,
                         recordCount = records.Count,
