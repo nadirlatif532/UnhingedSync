@@ -297,7 +297,19 @@ public static class ConfigLoader
     {
         // Generate one if this project has never been opened. Doing it here means every
         // entry point -- window, tabs, headless modes -- gets the same treatment.
-        var sharedPath = FindSharedConfig(projectRoot) ?? ConfigBootstrap.Ensure(projectRoot).ConfigPath;
+        // Generating a config is not a neutral fallback, so it is recorded rather than done
+        // quietly. If a project's Tools folder has not arrived from version control yet, the
+        // generated syncthingFolderId will differ from the team's committed one, every
+        // Syncthing call will then key on a folder nobody replicates, and the symptom is a
+        // permanently empty build list that looks exactly like nobody having published. Worse,
+        // the generated file is itself committable, so it can carry that divergence to
+        // everybody. Callers surface GeneratedConfigFor and warn.
+        var sharedPath = FindSharedConfig(projectRoot);
+        if (sharedPath is null)
+        {
+            sharedPath = ConfigBootstrap.Ensure(projectRoot).ConfigPath;
+            lock (GeneratedConfigs) GeneratedConfigs.Add(projectRoot);
+        }
 
         var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(sharedPath), Json.Options)
             ?? throw new InvalidOperationException($"Could not parse {sharedPath}");
@@ -389,6 +401,18 @@ public static class ConfigLoader
         {
             return expanded;
         }
+    }
+
+    private static readonly HashSet<string> GeneratedConfigs = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether this session generated the shared config for a project rather than finding a
+    /// committed one. A generated config invents a Syncthing folder ID, so on a project the
+    /// team already shares it is almost certainly wrong.
+    /// </summary>
+    public static bool WasConfigGeneratedFor(string projectRoot)
+    {
+        lock (GeneratedConfigs) return GeneratedConfigs.Contains(projectRoot);
     }
 
     /// <summary>

@@ -452,13 +452,40 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private static bool Confirm(string message, string title) =>
         MessageBox.Show(message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
 
+    /// <summary>
+    /// True when the installed binaries are not the ones this workspace's content expects.
+    ///
+    /// Computed here rather than read off Status, which is a single value produced by a chain
+    /// of early returns. Any earlier warning, including the engine mismatch raised during a
+    /// team engine upgrade, would set Status to Warning and mean this never read as Skew, so
+    /// the guard below silently stopped guarding at exactly the moment it was needed: the
+    /// user cannot install matching binaries during an upgrade, but could still open the
+    /// editor. Mismatched C++ and content is the one failure here that destroys work.
+    /// </summary>
+    private bool HasBinarySkew =>
+        _installedCommit is null || _installedCommit != WorkspaceCommit;
+
     private Task OpenEditorAsync()
     {
-        if (Status == StatusKind.Skew)
+        if (HasBinarySkew)
         {
-            SetStatus(StatusKind.Skew, StatusHeadline,
-                "Fetch matching binaries before opening the editor. Mismatched code can corrupt assets on save.");
-            return Task.CompletedTask;
+            var installed = _installedCommit ?? "none";
+            if (!Confirm(
+                    $"Your installed binaries are from {installed}, but your workspace is on " +
+                    $"{WorkspaceCommit}.\n\n" +
+                    "Opening the editor like this can permanently damage assets: if a UPROPERTY " +
+                    "changed between those commits, content saved against mismatched code can " +
+                    "silently drop data.\n\n" +
+                    "Press Sync & Ensure Binaries first. Open anyway?",
+                    "Binaries do not match your workspace"))
+            {
+                _log.Report($"Not opening the editor: binaries are from {installed}, workspace is " +
+                            $"on {WorkspaceCommit}.");
+                return Task.CompletedTask;
+            }
+
+            _log.Report($"WARNING: opening the editor with binaries from {installed} while the " +
+                        $"workspace is on {WorkspaceCommit}. Do not save assets.");
         }
 
         var uproject = Path.Combine(_config.ProjectRoot, _config.ProjectFile);
@@ -559,6 +586,22 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateStatus()
     {
+        // Checked before anything else, because everything else is downstream of it. A
+        // generated config invents a Syncthing folder ID, and every Syncthing call keys on
+        // that ID, so the share lookups, the peer list and the sync percentage are all
+        // quietly meaningless until it is corrected.
+        if (ConfigLoader.WasConfigGeneratedFor(_config.ProjectRoot))
+        {
+            SetStatus(StatusKind.Error,
+                "This project had no Unhinged Sync config, so one was generated",
+                $"That means the folder ID '{_config.SyncthingFolderId}' was invented on this " +
+                "machine. If your team already shares this project, theirs is different and you " +
+                "will never receive a build, however healthy Syncthing looks.\n\n" +
+                "Sync the project from Diversion so Tools/unhingedsync.json arrives, delete the " +
+                "generated one, and reopen. Do not commit the generated file.");
+            return;
+        }
+
         if (!_store.IsReachable)
         {
             SetStatus(StatusKind.Warning, "Binary share not reachable",

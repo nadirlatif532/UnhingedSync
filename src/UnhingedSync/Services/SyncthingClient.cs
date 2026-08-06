@@ -33,6 +33,10 @@ public sealed class SyncthingClient
     private string? _apiKey;
     private string _baseUri = "http://127.0.0.1:8384";
 
+    // Set once the key is loaded and the live endpoint confirmed. See EnsureReadyAsync.
+    private bool _ready;
+    private DateTimeOffset _lastPrimeAttempt = DateTimeOffset.MinValue;
+
     public string? ConfigPath { get; private set; }
 
     public bool TryLoadCredentials()
@@ -183,15 +187,47 @@ public sealed class SyncthingClient
 
     public string WebUiUri => _baseUri;
 
+    /// <summary>
+    /// Loads the API key and resolves the address Syncthing is really serving on, once per
+    /// client, before any request goes out.
+    ///
+    /// This is called from the transport layer rather than left to callers, and that is a
+    /// correctness requirement rather than tidiness. An unprimed client sends an empty API
+    /// key to a hardcoded port; TryGetAsync then swallows the 403 and hands back a null that
+    /// reads as a legitimate answer. Two separate callers were written against this class
+    /// without priming it, and both failed silently in the worst possible way: one reported
+    /// every share as 0% synced, the other decided nobody could delete anything. Neither
+    /// produced an error. Making the client safe by construction is the only fix that does
+    /// not depend on every future caller remembering.
+    /// </summary>
+    private async Task EnsureReadyAsync(CancellationToken ct)
+    {
+        if (_ready) return;
+
+        // Retry, but not on every single request: a failed prime can involve a loopback port
+        // scan, and a refresh makes several calls in a row.
+        if (DateTimeOffset.UtcNow - _lastPrimeAttempt < TimeSpan.FromSeconds(10)) return;
+        _lastPrimeAttempt = DateTimeOffset.UtcNow;
+
+        if (!TryLoadCredentials()) return;
+        _ready = await FindLiveEndpointAsync(ct);
+    }
+
     public async Task<SyncthingStatus> GetStatusAsync(CancellationToken ct = default)
     {
         if (!TryLoadCredentials())
             return new(SyncthingState.NotInstalled, null,
                 "Syncthing is not installed, or has never been started on this machine.");
 
-        // The address in config.xml is a hint, not a fact. Resolve the one it is actually
-        // serving on before deciding it is down.
+        // Explicitly re-probed here rather than reusing a cached result: this is the call
+        // behind a Refresh button, so the user is asking for a fresh answer.
+        _lastPrimeAttempt = DateTimeOffset.MinValue;
         var live = await FindLiveEndpointAsync(ct);
+        _ready = live;
+
+        // Stamped so the GetAsync below does not immediately repeat the probe, which on a
+        // dead endpoint means a second loopback port scan.
+        _lastPrimeAttempt = DateTimeOffset.UtcNow;
 
         try
         {
@@ -432,11 +468,19 @@ public sealed class SyncthingClient
         await PutAsync($"config/devices/{deviceId}", device, ct);
     }
 
-    /// <summary>Our own view of how much of the folder has arrived, 0-100.</summary>
-    public async Task<int> GetLocalCompletionAsync(string folderId, CancellationToken ct = default)
+    /// <summary>
+    /// Our own view of how much of the folder has arrived, 0-100, or null if Syncthing could
+    /// not answer.
+    ///
+    /// Nullable on purpose. Returning 0 for "could not ask" made an unreachable daemon and a
+    /// genuinely empty share indistinguishable, and the caller then told every user their
+    /// share was 0% complete and to wait, forever.
+    /// </summary>
+    public async Task<int?> GetLocalCompletionAsync(string folderId, CancellationToken ct = default)
     {
         var c = await TryGetAsync($"db/completion?folder={folderId}", ct);
-        return (int)Math.Round(c?["completion"]?.GetValue<double>() ?? 0);
+        if (c?["completion"]?.GetValue<double>() is not { } percent) return null;
+        return (int)Math.Round(percent);
     }
 
     // ---------------------------------------------------------------- transport
@@ -450,6 +494,7 @@ public sealed class SyncthingClient
 
     private async Task<JsonNode?> GetAsync(string path, CancellationToken ct)
     {
+        await EnsureReadyAsync(ct);
         using var response = await Http.SendAsync(Request(HttpMethod.Get, path), ct);
         response.EnsureSuccessStatusCode();
         var text = await response.Content.ReadAsStringAsync(ct);
@@ -464,6 +509,7 @@ public sealed class SyncthingClient
 
     private async Task PostAsync(string path, JsonNode body, CancellationToken ct)
     {
+        await EnsureReadyAsync(ct);
         using var request = Request(HttpMethod.Post, path);
         request.Content = JsonContent.Create(body);
         using var response = await Http.SendAsync(request, ct);
@@ -472,6 +518,7 @@ public sealed class SyncthingClient
 
     private async Task PutAsync(string path, JsonNode body, CancellationToken ct)
     {
+        await EnsureReadyAsync(ct);
         using var request = Request(HttpMethod.Put, path);
         request.Content = JsonContent.Create(body);
         using var response = await Http.SendAsync(request, ct);

@@ -101,6 +101,35 @@ public static class SelfTest
             Record("paths.adoption", false, e.Message);
         }
 
+        // --- the Syncthing client primes itself ---------------------------------
+        // Two callers were written against this class without calling GetStatusAsync first,
+        // and both failed silently: an unprimed client sends an empty API key to a hardcoded
+        // port, and TryGetAsync turns the 403 into a null that reads as a real answer. One
+        // reported every share as 0% synced forever, the other decided nobody could delete.
+        // ConfigPath is set only by TryLoadCredentials, so it witnesses that priming ran.
+        if (config is not null)
+        {
+            try
+            {
+                var fresh = new SyncthingClient();
+                var before = fresh.ConfigPath;
+                await fresh.GetLocalCompletionAsync(config.SyncthingFolderId);
+
+                Record("syncthing.selfPriming", before is null && fresh.ConfigPath is not null,
+                    new
+                    {
+                        configPathBeforeCall = before,
+                        configPathAfterCall = fresh.ConfigPath,
+                        resolvedEndpoint = fresh.WebUiUri,
+                        note = "a plain data call must prime credentials without GetStatusAsync"
+                    });
+            }
+            catch (Exception e)
+            {
+                Record("syncthing.selfPriming", false, e.Message);
+            }
+        }
+
         // --- known projects -----------------------------------------------------
         try
         {

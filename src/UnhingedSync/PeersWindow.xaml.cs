@@ -132,7 +132,9 @@ public partial class PeersWindow : Window
                 : $"{hubCount} hub(s): {string.Join(", ", peers.Where(p => p.IsIntroducer).Select(p => p.Name))}";
 
             var local = await _syncthing.GetLocalCompletionAsync(_config.SyncthingFolderId);
-            FolderStatus.Text = $"Your copy of the folder: {local}% complete";
+            FolderStatus.Text = local is { } percent
+                ? $"Your copy of the folder: {percent}% complete"
+                : $"Syncthing has no folder '{_config.SyncthingFolderId}' on this machine.";
         }
         catch (Exception e)
         {
