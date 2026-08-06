@@ -126,7 +126,20 @@ public static class ConfigBootstrap
             ["branch"] = "main",
             ["publishRootDefault"] = "",
             ["retainBuilds"] = 10,
-            ["syncthingFolderId"] = DeriveFolderId(projectName),
+            // Deliberately empty. A generated config cannot invent a bucket, and pretending
+            // otherwise is how the old folder-ID derivation silently produced a value that
+            // differed from the team's and left a machine reading somewhere nobody publishes.
+            // Empty means the app says "no bucket configured" rather than looking healthy.
+            ["storage"] = new JsonObject
+            {
+                ["provider"] = "r2",
+                ["accountId"] = "",
+                ["bucket"] = "",
+                ["accessKeyId"] = "",
+                ["secretAccessKey"] = "",
+                ["endpointUrl"] = "",
+                ["prefix"] = ""
+            },
             ["toolchain"] = new JsonObject
             {
                 ["compilerVersion"] = "Latest",

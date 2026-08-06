@@ -96,22 +96,6 @@ public static class ConfigLoader
     public static void PersistProjectRoot(string projectRoot) =>
         SaveLocalSetting("projectRoot", projectRoot);
 
-    /// <summary>
-    /// Remembers where this machine keeps the shared binaries. Per machine on purpose:
-    /// the tool is portable and every teammate's disks are laid out differently, so a
-    /// shared default would be wrong for most of them.
-    /// </summary>
-    public static void PersistPublishRoot(string publishRoot) =>
-        SaveLocalSetting("publishRoot", publishRoot);
-
-    /// <summary>
-    /// This machine's role, as chosen during Syncthing setup: artist, programmer or
-    /// buildhost. Empty when setup has not run. Used to decide who may hand out
-    /// introducer trust.
-    /// </summary>
-    public static string GetRole() =>
-        ReadLocalJson()?["role"]?.GetValue<string>() ?? "";
-
     /// <summary>Which engine install this machine uses for a given project, if overridden.</summary>
     public static string GetEngineOverride(string projectRoot)
     {
@@ -143,20 +127,6 @@ public static class ConfigLoader
 
     public static void SetDismissedUpdateVersion(string version) =>
         SaveLocalSetting("dismissedUpdateVersion", version);
-
-    /// <summary>
-    /// The publish root this machine has saved, or empty. Exposed so the updater can
-    /// tell whether it is running from inside the replicated share.
-    /// </summary>
-    public static string GetPersistedPublishRoot() => ReadLocalOverrides()?.PublishRoot ?? "";
-
-    /// <summary>
-    /// An API key to use instead of the one in Syncthing's config.xml. Needed when a
-    /// Syncthing 2 install's live settings have diverged from that file, which leaves the
-    /// app authenticating with a key the daemon no longer accepts.
-    /// </summary>
-    public static string GetSyncthingApiKey() =>
-        ReadLocalJson()?["syncthingApiKey"]?.GetValue<string>() ?? "";
 
     /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
     public static bool GetDeclinedPowerShellInstall() =>
@@ -317,126 +287,25 @@ public static class ConfigLoader
         config.ProjectRoot = projectRoot;
         config.EngineDirOverride = GetEngineOverride(projectRoot);
 
-        // A relative publish root is resolved against the project, so the share can
-        // live inside the project tree and still mean the same thing on every machine.
-        var publishRoot = ResolvePublishRoot(config);
-        config.PublishRoot = Path.IsPathRooted(publishRoot)
-            ? publishRoot
-            : Path.GetFullPath(Path.Combine(projectRoot, publishRoot));
-
+        // No publish root to resolve any more. Where builds live is the bucket named in this
+        // very file, so there is no per-machine path, no five-step fallback chain, and nothing
+        // that can silently disagree with what is actually storing the builds.
         return config;
-    }
-
-    private static string ResolvePublishRoot(AppConfig config)
-    {
-        // The explicit, deliberate override wins over everything, including Syncthing.
-        var fromEnv = Environment.GetEnvironmentVariable("UNHINGEDSYNC_PUBLISH_ROOT");
-        if (!string.IsNullOrWhiteSpace(fromEnv)) return fromEnv;
-
-        // Syncthing outranks the saved value, which is subtle but load-bearing.
-        //
-        // The saved value is not necessarily a choice anybody made: EnsurePublishRoot
-        // persists whatever was resolved on every startup, so a machine that once fell
-        // through to the default below has that default written down. Checking the saved
-        // value first therefore made this lookup unreachable on exactly the machines that
-        // needed it, and they carried on reading an empty folder while Syncthing
-        // replicated somewhere else. Whatever Syncthing is actually replicating is the
-        // only answer that can be right, and UNHINGEDSYNC_PUBLISH_ROOT above remains the
-        // way to say otherwise on purpose.
-        if (SyncthingClient.TryGetFolderPathFromConfig(config.SyncthingFolderId) is { Length: > 0 } fromSyncthing)
-            return NormalisePath(fromSyncthing);
-
-        if (ReadLocalOverrides()?.PublishRoot is { Length: > 0 } configured) return configured;
-
-        // The exe is normally distributed inside the replicated share itself, either at
-        // its root or one level down (\App). Recognising both means a teammate can run
-        // it straight off the share with nothing configured.
-        var beside = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
-        foreach (var candidate in new[] { beside, Path.GetDirectoryName(beside) })
-        {
-            if (!string.IsNullOrEmpty(candidate) &&
-                Directory.Exists(Path.Combine(candidate, "records")))
-                return candidate;
-        }
-
-        if (!string.IsNullOrWhiteSpace(config.PublishRootDefault)) return config.PublishRootDefault;
-
-        // A working default rather than a question. Where the binaries land is not a
-        // decision a new teammate can make well on their first run, and the one genuinely
-        // wrong answer -- inside the project, where 'dv clean' deletes ignored files -- is
-        // exactly the one they might pick by accident. Visible and obviously named, so it
-        // can be found again when pointing Syncthing at it.
-        return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "UnhingedShare");
-    }
-
-    /// <summary>
-    /// Turns a path as Syncthing stores it into one Windows APIs will accept.
-    ///
-    /// Syncthing keeps the folder path as the user typed it, which includes forms .NET does
-    /// not understand: "~/UnhingedShare" and forward slashes are both normal there and
-    /// Syncthing expands them itself. Passed through raw, "~\UnhingedShare" is not rooted,
-    /// so it would be resolved against the project and create a literal "~" folder inside
-    /// the Unreal workspace, which is the one location this whole resolver exists to avoid.
-    /// </summary>
-    public static string NormalisePath(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path)) return path;
-
-        var expanded = path.Trim().Replace('/', Path.DirectorySeparatorChar);
-
-        if (expanded is "~" || expanded.StartsWith(@"~\", StringComparison.Ordinal))
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            expanded = expanded.Length <= 1 ? home : Path.Combine(home, expanded[2..]);
-        }
-
-        expanded = Environment.ExpandEnvironmentVariables(expanded);
-
-        try
-        {
-            return Path.IsPathRooted(expanded) ? Path.GetFullPath(expanded) : expanded;
-        }
-        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return expanded;
-        }
     }
 
     private static readonly HashSet<string> GeneratedConfigs = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Whether this session generated the shared config for a project rather than finding a
-    /// committed one. A generated config invents a Syncthing folder ID, so on a project the
-    /// team already shares it is almost certainly wrong.
+    /// Whether this session generated the shared config rather than finding a committed one.
+    ///
+    /// Still worth surfacing after the move to a bucket, for a different reason than before.
+    /// A generated config has an empty storage block, so the project has nowhere to read
+    /// builds from, and the likeliest cause is that Tools/ has not arrived from version
+    /// control yet. Saying so beats an empty list and a shrug.
     /// </summary>
     public static bool WasConfigGeneratedFor(string projectRoot)
     {
         lock (GeneratedConfigs) return GeneratedConfigs.Contains(projectRoot);
-    }
-
-    /// <summary>
-    /// Decides whether Syncthing's folder path is somewhere different from where we are
-    /// reading, returning the path to adopt or null to stay put.
-    ///
-    /// Separated out because it is the whole decision, and getting it wrong is invisible:
-    /// too eager and the app rewrites its config on every refresh, too shy and it keeps
-    /// reading an empty folder. The comparison has to survive trailing separators, case,
-    /// forward slashes and "~", all of which Syncthing stores verbatim.
-    /// </summary>
-    public static string? ResolveAdoption(string? livePath, string currentPath)
-    {
-        if (string.IsNullOrWhiteSpace(livePath)) return null;
-
-        var live = NormalisePath(livePath);
-        if (string.IsNullOrWhiteSpace(live)) return null;
-
-        var current = NormalisePath(currentPath ?? "");
-
-        return Path.TrimEndingDirectorySeparator(live)
-                   .Equals(Path.TrimEndingDirectorySeparator(current), StringComparison.OrdinalIgnoreCase)
-            ? null
-            : live;
     }
 
     private static LocalOverrides? ReadLocalOverrides()

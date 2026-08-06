@@ -51,21 +51,6 @@ public static class UpdateChecker
             // would otherwise re-hit the API on every single launch.
             ConfigLoader.SetLastUpdateCheckUtc(DateTimeOffset.UtcNow);
 
-            // Updating in place inside the replicated share would push two ~60 MB writes
-            // to every peer and, on a receive-only machine, leave the folder permanently
-            // out of sync -- which also breaks the sync-percentage the team relies on.
-            // It is redundant there anyway: Syncthing already distributes the new exe.
-            if (RunningInsideShare())
-            {
-                if (manual)
-                    Tell(owner, "This copy is running from inside the shared binaries folder, " +
-                                "so it updates by replication rather than by downloading.\n\n" +
-                                "Whoever publishes the tool should update it there. To self-update, " +
-                                "run a copy kept outside the share.",
-                        MessageBoxImage.Information);
-                return;
-            }
-
             var (latest, zipUrl) = await FetchLatestAsync();
             var current = CurrentVersion();
 
@@ -121,28 +106,10 @@ public static class UpdateChecker
         }
     }
 
-    /// <summary>
-    /// Whether this exe sits in the Syncthing-replicated publish root, or its \App
-    /// subfolder. Mirrors how ConfigLoader recognises the same layout.
-    /// </summary>
-    private static bool RunningInsideShare()
-    {
-        var dir = Path.GetDirectoryName(Environment.ProcessPath ?? "");
-        if (string.IsNullOrEmpty(dir)) return false;
-
-        var configured = ConfigLoader.GetPersistedPublishRoot();
-
-        foreach (var candidate in new[] { dir, Path.GetDirectoryName(dir.TrimEnd(Path.DirectorySeparatorChar)) })
-        {
-            if (string.IsNullOrEmpty(candidate)) continue;
-            if (Directory.Exists(Path.Combine(candidate, "records"))) return true;
-            if (!string.IsNullOrEmpty(configured) &&
-                Path.TrimEndingDirectorySeparator(candidate)
-                    .Equals(Path.TrimEndingDirectorySeparator(configured), StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        return false;
-    }
+    // The updater used to refuse to run when the exe sat inside the replicated share, where
+    // swapping it pushed two 60 MB writes to every peer and left receive-only machines
+    // permanently out of sync. There is no replicated folder to sit inside now, so the guard
+    // and the hazard both went away.
 
     private static bool ShouldCheckNow()
     {

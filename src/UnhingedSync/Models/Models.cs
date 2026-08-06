@@ -15,7 +15,6 @@ public sealed class AppConfig
     public string Platform { get; set; } = "Win64";
     public string Configuration { get; set; } = "Development";
     public string Branch { get; set; } = "main";
-    public string PublishRootDefault { get; set; } = "";
     public int RetainBuilds { get; set; } = 10;
     public EngineConfig Engine { get; set; } = new();
 
@@ -25,15 +24,11 @@ public sealed class AppConfig
     /// </summary>
     public StorageConfig Storage { get; set; } = new();
 
-    /// <summary>
-    /// Syncthing folder ID, kept only so an older project config still deserialises
-    /// without error while the team moves to object storage. Nothing reads it.
-    /// </summary>
-    public string SyncthingFolderId { get; set; } = "";
+    // syncthingFolderId, publishRootDefault and the per-machine publish root are gone. An
+    // older config carrying them still loads: unknown properties are ignored.
 
     /// <summary>Resolved at load time; never round-tripped to the shared file.</summary>
     [JsonIgnore] public string ProjectRoot { get; set; } = "";
-    [JsonIgnore] public string PublishRoot { get; set; } = "";
 
     /// <summary>
     /// Machine-local engine choice. Install paths differ per machine, so this never

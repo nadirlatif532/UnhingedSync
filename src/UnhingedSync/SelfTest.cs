@@ -30,104 +30,15 @@ public static class SelfTest
             Record("config.load", true, new
             {
                 config.ProjectRoot,
-                config.PublishRoot,
                 config.EditorTarget,
+                storageConfigured = config.Storage.IsConfigured,
+                bucket = config.Storage.Bucket,
                 expectedBuildId = config.Engine.ExpectedBuildId
             });
         }
         catch (Exception e)
         {
             Record("config.load", false, e.Message);
-        }
-
-        // --- path normalisation -------------------------------------------------
-        // Syncthing stores folder paths as typed, so "~/UnhingedShare" and forward slashes
-        // both turn up. An unrooted result gets resolved against the project, which would
-        // create a literal "~" folder inside the Unreal workspace: the one location the
-        // whole publish-root resolver exists to avoid, because dv clean empties it.
-        try
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var cases = new (string Input, string Expected)[]
-            {
-                (@"~\UnhingedShare", Path.Combine(home, "UnhingedShare")),
-                ("~/UnhingedShare",  Path.Combine(home, "UnhingedShare")),
-                ("~",                home),
-                (@"C:/Share/sub",    @"C:\Share\sub")
-            };
-
-            var bad = cases
-                .Select(c => new { c.Input, c.Expected, Actual = ConfigLoader.NormalisePath(c.Input) })
-                .Where(r => !r.Actual.Equals(r.Expected, StringComparison.OrdinalIgnoreCase) ||
-                            !Path.IsPathRooted(r.Actual))
-                .ToList();
-
-            Record("paths.normalise", bad.Count == 0, bad.Count == 0 ? "all rooted and expanded" : bad);
-        }
-        catch (Exception e)
-        {
-            Record("paths.normalise", false, e.Message);
-        }
-
-        // --- adopting Syncthing's folder ----------------------------------------
-        // The app follows Syncthing rather than warning about a mismatch, so this decision
-        // runs on every refresh. Too eager and it rewrites config constantly; too shy and it
-        // keeps reading an empty folder while Syncthing replicates elsewhere.
-        try
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var checks = new (string Name, string? Live, string Current, bool ExpectAdopt)[]
-            {
-                ("identical",        @"C:\Share",        @"C:\Share",        false),
-                ("trailing slash",   @"C:\Share\",       @"C:\Share",        false),
-                ("case differs",     @"c:\share",        @"C:\Share",        false),
-                ("forward slashes",  "C:/Share",         @"C:\Share",        false),
-                ("tilde expands",    @"~\UnhingedShare", Path.Combine(home, "UnhingedShare"), false),
-                ("genuinely moved",  @"D:\Elsewhere",    @"C:\Share",        true),
-                ("no live folder",   null,               @"C:\Share",        false),
-                ("blank live",       "   ",              @"C:\Share",        false)
-            };
-
-            var wrong = checks
-                .Select(c => new { c.Name, Adopted = ConfigLoader.ResolveAdoption(c.Live, c.Current), c.ExpectAdopt })
-                .Where(r => (r.Adopted is not null) != r.ExpectAdopt)
-                .ToList();
-
-            Record("paths.adoption", wrong.Count == 0,
-                wrong.Count == 0 ? $"{checks.Length} cases correct" : wrong);
-        }
-        catch (Exception e)
-        {
-            Record("paths.adoption", false, e.Message);
-        }
-
-        // --- the Syncthing client primes itself ---------------------------------
-        // Two callers were written against this class without calling GetStatusAsync first,
-        // and both failed silently: an unprimed client sends an empty API key to a hardcoded
-        // port, and TryGetAsync turns the 403 into a null that reads as a real answer. One
-        // reported every share as 0% synced forever, the other decided nobody could delete.
-        // ConfigPath is set only by TryLoadCredentials, so it witnesses that priming ran.
-        if (config is not null)
-        {
-            try
-            {
-                var fresh = new SyncthingClient();
-                var before = fresh.ConfigPath;
-                await fresh.GetLocalCompletionAsync(config.SyncthingFolderId);
-
-                Record("syncthing.selfPriming", before is null && fresh.ConfigPath is not null,
-                    new
-                    {
-                        configPathBeforeCall = before,
-                        configPathAfterCall = fresh.ConfigPath,
-                        resolvedEndpoint = fresh.WebUiUri,
-                        note = "a plain data call must prime credentials without GetStatusAsync"
-                    });
-            }
-            catch (Exception e)
-            {
-                Record("syncthing.selfPriming", false, e.Message);
-            }
         }
 
         // --- known projects -----------------------------------------------------

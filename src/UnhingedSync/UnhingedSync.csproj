@@ -32,8 +32,6 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\scripts\Invoke-UnhingedBuild.ps1" LogicalName="scripts/Invoke-UnhingedBuild.ps1" />
     <EmbeddedResource Include="..\..\scripts\Test-EngineIntegrity.ps1" LogicalName="scripts/Test-EngineIntegrity.ps1" />
-    <EmbeddedResource Include="..\..\scripts\Setup-Syncthing.ps1" LogicalName="scripts/Setup-Syncthing.ps1" />
-    <EmbeddedResource Include="..\..\scripts\Setup-Syncthing.bat" LogicalName="scripts/Setup-Syncthing.bat" />
     <EmbeddedResource Include="..\..\scripts\Reset-Ftue.ps1" LogicalName="scripts/Reset-Ftue.ps1" />
   </ItemGroup>
   <ItemGroup>

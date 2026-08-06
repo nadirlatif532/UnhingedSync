@@ -90,15 +90,6 @@ public partial class App
             return;
         }
 
-        if (e.Args.Any(a => a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase)))
-        {
-            var path = e.Args.SkipWhile(a => !a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase))
-                             .Skip(1)
-                             .FirstOrDefault();
-            Shutdown(await Diagnose.RunSyncthingAsync(path));
-            return;
-        }
-
         if (e.Args.Any(a => a.Equals("--fetch", StringComparison.OrdinalIgnoreCase)))
         {
             var commit = e.Args.SkipWhile(a => !a.Equals("--fetch", StringComparison.OrdinalIgnoreCase))
@@ -124,7 +115,7 @@ public partial class App
         {
             UpdateChecker.CleanUpAfterRelaunch();
             if (!EnsureAtLeastOneProject()) { Shutdown(1); return; }
-            if (!EnsurePublishRoot()) { Shutdown(1); return; }
+            if (!EnsureStorageConfigured()) { Shutdown(1); return; }
 
             var window = new MainWindow();
             window.Show();
@@ -220,31 +211,38 @@ public partial class App
     }
 
     /// <summary>
-    /// Settles where this machine keeps the shared binaries, without asking.
+    /// Confirms the project names somewhere to read builds from.
     ///
-    /// This used to be the second question of a first run, which is a poor question to put
-    /// to someone who has just unzipped the tool: they have no basis to answer, and the one
-    /// genuinely harmful answer -- inside the project, where 'dv clean' deletes ignored
-    /// files -- is exactly the one they might pick by accident. A default is chosen and
-    /// persisted instead, which also means the Syncthing setup script finds a location in
-    /// config.local.json rather than failing for want of one. Override by editing that file
-    /// or setting UNHINGEDSYNC_PUBLISH_ROOT.
+    /// This used to create and remember a local folder, because the share was a directory
+    /// this machine had to own. There is no such folder now: the bucket is named in the
+    /// project's committed config, so the only thing worth checking is that somebody filled
+    /// it in. Failing here is not fatal, because the window explains it better than a dialog
+    /// on a blank screen can.
     /// </summary>
-    private static bool EnsurePublishRoot()
+    private static bool EnsureStorageConfigured()
     {
         try
         {
             var config = ConfigLoader.Load();
-            Directory.CreateDirectory(config.PublishRoot);
-            ConfigLoader.PersistPublishRoot(config.PublishRoot);
+            if (config.Storage.IsConfigured) return true;
+
+            MessageBox.Show(
+                $"No object store is configured for {config.ProjectName}.\n\n" +
+                $"Missing: {config.Storage.DescribeWhatIsMissing()}\n\n" +
+                "Fill in the \"storage\" block in Tools/unhingedsync.json. If your team already " +
+                "uses this tool, that file comes from version control, so syncing the project " +
+                "should bring it. Then check it with:\n\n    UnhingedSync.exe --storagetest",
+                "No bucket configured", MessageBoxButton.OK, MessageBoxImage.Warning);
+
+            // Still opens: the commit list and Build Locally are useful, and the status
+            // banner repeats this without blocking the whole app on a config file.
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             MessageBox.Show(
-                $"Could not create the folder for shared binaries:\n\n{e.Message}\n\n" +
-                "Set UNHINGEDSYNC_PUBLISH_ROOT to a writable folder and try again.",
-                "Cannot reach the binaries folder", MessageBoxButton.OK, MessageBoxImage.Error);
+                $"Could not read this project's configuration:\n\n{e.Message}",
+                "Cannot read the configuration", MessageBoxButton.OK, MessageBoxImage.Error);
             return false;
         }
     }

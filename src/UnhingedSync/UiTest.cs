@@ -82,12 +82,6 @@ public static class UiTest
                 Realise(view);
             });
 
-            Check("PeersWindow", () =>
-            {
-                var window = new PeersWindow(config);
-                Realise(window);
-            });
-
             Check("ManageBinariesWindow", () =>
             {
                 var window = new ManageBinariesWindow(config);

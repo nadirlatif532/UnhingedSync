@@ -19,11 +19,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private readonly AppConfig _config;
     private readonly DvCli _dv;
-    private readonly SyncthingClient _syncthing = new();
-
-    // Rebuilt when the share moves, which the app follows rather than fights.
-    private BuildStore _store;
-    private BinaryInstaller _installer;
+    private readonly BuildStore _store;
+    private readonly BinaryInstaller _installer;
     private readonly LocalBuilder _builder;
     private EngineInfo _engine;
     private readonly IProgress<string> _log;
@@ -178,53 +175,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     // ---------------------------------------------------------------- operations
 
-    /// <summary>
-    /// Follows Syncthing if it is replicating the folder somewhere other than where we are
-    /// reading.
-    ///
-    /// Syncthing is the thing actually moving the bytes, so if the two disagree the app is
-    /// simply wrong, and the symptom is an empty build list that looks exactly like "nobody
-    /// has published anything". This used to be a warning banner telling people to set an
-    /// environment variable, which is a poor thing to ask of a teammate and which they had
-    /// no way to act on.
-    ///
-    /// Config is resolved once when the tab opens, so this has to run on every refresh: a
-    /// folder accepted mid-session, especially through Syncthing's own web UI, would
-    /// otherwise never be noticed.
-    /// </summary>
-    private async Task AdoptSyncthingFolderAsync()
-    {
-        // A deliberate override is left alone. Nothing else here is a real choice.
-        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UNHINGEDSYNC_PUBLISH_ROOT")))
-            return;
-
-        string? live;
-        try
-        {
-            // The running daemon first: config.xml can be stale, and a folder accepted a
-            // moment ago in the web UI only exists in the daemon's live configuration.
-            live = await _syncthing.GetFolderPathAsync(_config.SyncthingFolderId)
-                   ?? SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
-        }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
-        {
-            return; // Syncthing unreachable; keep whatever we have.
-        }
-
-        if (ConfigLoader.ResolveAdoption(live, _config.PublishRoot) is not { } resolved) return;
-
-        _log.Report($"Syncthing keeps this project's binaries in {resolved}. Following it.");
-
-        _config.PublishRoot = resolved;
-        ConfigLoader.PersistPublishRoot(resolved);
-
-        // Both of these captured the old path, so they have to be rebuilt rather than
-        // merely re-read.
-        _store = new BuildStore(_config);
-        _installer = new BinaryInstaller(_config);
-
-        OnPropertyChanged(nameof(PublishRootText));
-    }
+    // Where builds live used to be a per-machine question with five fallbacks and a
+    // reconciliation pass, because Syncthing decided it independently and the two could
+    // disagree silently. The bucket is named in the committed project config, so there is
+    // nothing to resolve, adopt or keep in step.
 
     public async Task RefreshAsync()
     {
@@ -616,19 +570,20 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private void UpdateStatus()
     {
-        // Checked before anything else, because everything else is downstream of it. A
-        // generated config invents a Syncthing folder ID, and every Syncthing call keys on
-        // that ID, so the share lookups, the peer list and the sync percentage are all
-        // quietly meaningless until it is corrected.
+        // Checked before anything else, because everything else is downstream of it. This is
+        // named specifically rather than falling through to "no bucket configured", because
+        // the cause and the fix are different: a generated config almost always means the
+        // project's Tools folder has not arrived from version control yet, and the answer is
+        // to sync rather than to start filling in credentials.
         if (ConfigLoader.WasConfigGeneratedFor(_config.ProjectRoot))
         {
             SetStatus(StatusKind.Error,
-                "This project had no Unhinged Sync config, so one was generated",
-                $"That means the folder ID '{_config.SyncthingFolderId}' was invented on this " +
-                "machine. If your team already shares this project, theirs is different and you " +
-                "will never receive a build, however healthy Syncthing looks.\n\n" +
-                "Sync the project from Diversion so Tools/unhingedsync.json arrives, delete the " +
-                "generated one, and reopen. Do not commit the generated file.");
+                "This project had no Unhinged Sync config, so a blank one was generated",
+                "If your team already uses this tool, Tools/unhingedsync.json comes from " +
+                "Diversion and has the bucket details in it, so this most likely means the " +
+                "project has not finished syncing.\n\n" +
+                "Sync the project, delete the generated file, and reopen. Do not commit the " +
+                "generated one over the team's.");
             return;
         }
 

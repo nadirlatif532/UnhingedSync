@@ -11,12 +11,6 @@ public partial class ProjectView : UserControl
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
 
-    private void Sharing_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel is null) return;
-        new PeersWindow(ViewModel.Config) { Owner = Window.GetWindow(this) }.ShowDialog();
-    }
-
     private async void ManageBinaries_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel is null) return;

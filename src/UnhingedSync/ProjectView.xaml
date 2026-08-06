@@ -108,8 +108,6 @@
                 Command="{Binding SyncAndEnsureCommand}"
                 ToolTip="Pull the latest commit, then install the matching binaries. It never compiles: if none have been published it tells you why, so a share that is not syncing cannot hide behind a local build." />
         <Button Content="Refresh" Command="{Binding RefreshCommand}" />
-        <Button Content="Sharing…" Click="Sharing_Click"
-                ToolTip="Syncthing pairing: your device ID, invite a teammate, and accept requests, without leaving this app." />
         <Button Content="Manage Binaries…" Click="ManageBinaries_Click"
                 ToolTip="See every published build, delete individual ones, or keep only the newest few. This is the shared folder, so deletions affect the whole team." />
         <Button Content="Fetch Selected" Command="{Binding FetchSelectedCommand}"
