@@ -233,25 +233,26 @@ public static class SelfTest
         {
             try
             {
-                var store = new BuildStore(config);
-                var records = store.ReadAll();
-                Record("store.read", true, new
+                using var store = new BuildStore(config);
+                var records = store.IsConfigured ? await store.ReadAllAsync() : [];
+                Record("store.read", store.IsConfigured, new
                 {
-                    store.Root,
-                    reachable = store.IsReachable,
+                    store.Description,
+                    configured = store.IsConfigured,
+                    reachable = store.LastKnownReachable,
+                    cacheDir = store.CacheDir,
+                    cacheMegabytes = Math.Round(store.CacheBytes() / 1024.0 / 1024.0, 1),
                     recordCount = records.Count,
                     fetchable = records.Count(r => r.IsFetchable),
-                    // Per-record status exposes the reconcile rules: a record claiming
-                    // success whose zip vanished must read as expired, and one whose zip
-                    // is the wrong size must read as still syncing.
+                    // Per-record status exposes the reconcile rule: a record claiming success
+                    // whose payload is no longer in the bucket must read as expired.
                     reconciled = records.Select(r => new
                     {
                         r.CommitId, r.Status, r.ZipName, r.ZipBytes, r.IsFetchable
                     }).ToList(),
                     claimOnNewest = records.FirstOrDefault() is { } n
-                        ? store.ActiveClaimBy(n.CommitOrdinal.ToString(), TimeSpan.FromMinutes(90))
-                        : null,
-                    claimOn53 = store.ActiveClaimBy("53", TimeSpan.FromMinutes(90))
+                        ? await store.ActiveClaimByAsync(n.CommitOrdinal.ToString(), TimeSpan.FromMinutes(90))
+                        : null
                 });
             }
             catch (Exception e)

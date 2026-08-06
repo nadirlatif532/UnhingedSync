@@ -137,9 +137,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
                           ?? EngineOptions[0];
         OnPropertyChanged(nameof(SelectedEngine));
     }
-    public string PublishRootText => _store.IsReachable
-        ? _config.PublishRoot
-        : $"{_config.PublishRoot}  (not reachable)";
+    public string PublishRootText => _store.LastKnownReachable
+        ? _store.Description
+        : $"{_store.Description}  (not reachable)";
 
     public string Branch { get => _branch; private set => Set(ref _branch, value); }
     public string WorkspaceCommit { get => _workspaceCommit; private set => Set(ref _workspaceCommit, value); }
@@ -230,29 +230,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
     {
         await RunAsync("Refreshing…", async () =>
         {
-            await AdoptSyncthingFolderAsync();
             WorkspaceCommit = await _dv.GetWorkspaceCommitAsync();
             Branch = await _dv.GetBranchAsync();
-            var commits = await _dv.GetLogAsync(60);
-            var records = _store.ReadAll().ToDictionary(r => r.CommitId);
-            _installedCommit = _installer.ReadInstalled()?.CommitId;
 
-            Rows.Clear();
-            foreach (var commit in commits)
-            {
-                records.TryGetValue(commit.CommitId, out var record);
-                Rows.Add(new CommitRowViewModel
-                {
-                    Commit = commit,
-                    Record = record,
-                    IsWorkspace = commit.CommitId == WorkspaceCommit,
-                    IsInstalled = commit.CommitId == _installedCommit,
-                    ClaimedBy = _store.ActiveClaimBy(commit.Ordinal.ToString(), ClaimMaxAge)
-                });
-            }
-
-            OnPropertyChanged(nameof(InstalledCommitText));
-            UpdateStatus();
+            // Was a near-copy of ReloadRowsAsync, which is how the two drifted: only one of
+            // them ever got the single-listing claim lookup.
+            await ReloadRowsAsync();
         });
     }
 
@@ -273,7 +256,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Branch = await _dv.GetBranchAsync();
             _log.Report($"Workspace is now on {WorkspaceCommit} ({Branch}).");
 
-            var record = FindUsableRecord(WorkspaceCommit);
+            var record = await FindUsableRecordAsync(WorkspaceCommit);
             if (record is null)
             {
                 // Deliberately does NOT build. Quietly compiling on a miss made this button
@@ -287,8 +270,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             _log.Report($"Found published binaries for {WorkspaceCommit} (built by {record.BuiltBy}).");
 
+            BusyText = "Downloading binaries…";
+            var zip = await _store.EnsureLocalZipAsync(record, _log);
+
             BusyText = "Installing binaries…";
-            var zip = _store.ZipPathFor(record)!;
             await _installer.InstallAsync(record, _engine, zip, _log);
 
             await ReloadRowsAsync();
@@ -308,7 +293,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private async Task ExplainMissingBinariesAsync()
     {
         var commitShort = WorkspaceCommit.Replace("dv.commit.", "");
-        var otherMachine = _store.ActiveClaimBy(commitShort, ClaimMaxAge);
+        var otherMachine = await _store.ActiveClaimByAsync(commitShort, ClaimMaxAge);
 
         if (otherMachine is not null)
         {
@@ -320,41 +305,46 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        // How much of the share has actually arrived. Unknown is reported as unknown rather
-        // than guessed at, because the number is the whole point of showing it.
-        int? completion = null;
-        try { completion = await _syncthing.GetLocalCompletionAsync(_config.SyncthingFolderId); }
-        catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { }
-
-        var records = _store.ReadAll().Count;
-        var syncNote = completion switch
+        // Says which of the two situations this is, rather than leaving the user to guess.
+        // Against a bucket the distinction is exact: either the store answered and this
+        // commit is genuinely unbuilt, or the store could not be reached at all. There is no
+        // longer a partially-arrived middle case to reason about, which is what the sync
+        // percentage existed to describe.
+        string reason;
+        List<BuildRecord> published;
+        try
         {
-            null => "Syncthing could not be reached, so the share may not be syncing at all.",
-            < 100 => $"Your copy of the share is {completion}% complete, so the binaries may " +
-                     "simply not have arrived yet. Give it a moment and press Refresh.",
-            _ => $"Your copy of the share is fully synced and holds {records} build record(s), " +
-                 "so this commit genuinely has not been published by anyone."
-        };
+            published = await _store.ReadAllAsync();
+            reason = published.Count == 0
+                ? $"Nothing at all has been published to {_store.Description} yet."
+                : $"{_store.Description} holds {published.Count} build(s), but none for this commit.";
+        }
+        catch (Exception e)
+        {
+            published = [];
+            reason = $"Could not reach {_store.Description}, so it is not known whether this " +
+                     $"commit has been built: {e.Message}";
+        }
 
-        _log.Report($"No binaries published for {WorkspaceCommit}. {syncNote}");
+        _log.Report($"No binaries published for {WorkspaceCommit}. {reason}");
 
         var capability = _builder.CanBuild(_engine);
 
         SetStatus(StatusKind.NeedsBinaries,
             $"No binaries for {WorkspaceCommit}",
-            syncNote + (capability.CanBuild
-                ? " If it really has not been built, press Build Locally to compile and publish it."
+            reason + (capability.CanBuild
+                ? " Press Build Locally to compile and publish it for the team."
                 : $" This machine cannot build: {capability.Reason}"));
 
         MessageBox.Show(
             $"No binaries have been published for {WorkspaceCommit}.\n\n" +
-            syncNote + "\n\n" +
+            reason + "\n\n" +
             (capability.CanBuild
                 ? "This is not done for you automatically, because compiling on every miss hides " +
-                  "a share that is not syncing.\n\nIf you are sure nobody has built this commit, " +
-                  "press Build Locally to compile and publish it for the team."
+                  "a store that is unreachable or a commit nobody has built.\n\nPress Build " +
+                  "Locally to compile and publish it for the team."
                 : $"This machine cannot compile it either:\n{capability.Reason}\n\n" +
-                  "Ask a programmer to build this commit."),
+                  "Ask someone with a C++ toolchain to build this commit."),
             "No binaries for this commit", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
@@ -384,8 +374,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                             $"is on {WorkspaceCommit}. Sync in Diversion before opening the editor.");
             }
 
-            var zip = _store.ZipPathFor(row.Record)
-                ?? throw new InvalidOperationException("That build's payload is no longer available.");
+            var zip = await _store.EnsureLocalZipAsync(row.Record, _log);
             await _installer.InstallAsync(row.Record, _engine, zip, _log);
             await ReloadRowsAsync();
         });
@@ -433,7 +422,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
             // Install from what we just published so the marker describes reality
             // rather than whatever was downloaded before.
-            var mine = _store.ReadAll().FirstOrDefault(
+            var mine = (await _store.ReadAllAsync()).FirstOrDefault(
                 r => r.CommitId == WorkspaceCommit &&
                      r.BuiltBy.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase));
 
@@ -443,7 +432,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 return;
             }
 
-            await _installer.InstallAsync(mine, _engine, _store.ZipPathFor(mine)!, _log);
+            await _installer.InstallAsync(mine, _engine, await _store.EnsureLocalZipAsync(mine, _log), _log);
             await ReloadRowsAsync();
             _log.Report("Done. PDBs for this build are on disk locally and were not published.");
         });
@@ -494,15 +483,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return Task.CompletedTask;
     }
 
-    private Task OpenLogAsync()
+    private async Task OpenLogAsync()
     {
-        if (SelectedRow?.Record is null) return Task.CompletedTask;
-        var path = _store.LogPathFor(SelectedRow.Record);
+        if (SelectedRow?.Record is null) return;
+
+        // Downloaded on demand rather than held by everyone. Most people never open a log.
+        var path = await _store.EnsureLocalLogAsync(SelectedRow.Record);
         if (path is not null && File.Exists(path))
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         else
             _log.Report("That build log is no longer available.");
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -520,7 +510,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             $"Project: {_config.ProjectName} ({_config.ProjectRoot})",
             $"Branch: {Branch}   Workspace: {WorkspaceCommit}   Installed: {InstalledCommitText}",
             $"Engine: {EngineText}   Dir: {_engine.InstallDir}",
-            $"Publish root: {_config.PublishRoot} (reachable: {_store.IsReachable})",
+            $"Store: {_store.Description} (reachable: {_store.LastKnownReachable})",
+            $"Download cache: {_store.CacheDir} ({_store.CacheBytes() / 1024.0 / 1024.0:0.#} MB)",
             $"PowerShell: {PowerShellLocator.Find() ?? "NOT FOUND"}",
             $"Status: {StatusHeadline}",
             $"Detail: {StatusDetail}",
@@ -544,9 +535,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     // ---------------------------------------------------------------- helpers
 
-    private BuildRecord? FindUsableRecord(string commitId)
+    private async Task<BuildRecord?> FindUsableRecordAsync(string commitId)
     {
-        var record = _store.ReadAll().FirstOrDefault(r => r.CommitId == commitId && r.IsFetchable);
+        var record = (await _store.ReadAllAsync())
+            .FirstOrDefault(r => r.CommitId == commitId && r.IsFetchable);
         if (record is null) return null;
 
         if (_config.Engine.EnforceBuildIdMatch &&
@@ -560,23 +552,43 @@ public sealed class MainViewModel : INotifyPropertyChanged
         return record;
     }
 
+    /// <summary>
+    /// Rebuilds the commit table. Two store calls total, whatever the row count: the records
+    /// and the in-flight claims are each fetched once and joined in memory.
+    /// </summary>
     private async Task ReloadRowsAsync()
     {
         var commits = await _dv.GetLogAsync(60);
-        var records = _store.ReadAll().ToDictionary(r => r.CommitId);
+
+        Dictionary<string, BuildRecord> records;
+        Dictionary<string, string> claims;
+        try
+        {
+            records = (await _store.ReadAllAsync()).ToDictionary(r => r.CommitId);
+            claims = await _store.ActiveClaimsAsync(ClaimMaxAge);
+        }
+        catch (Exception e)
+        {
+            _log.Report($"Could not read {_store.Description}: {e.Message}");
+            records = [];
+            claims = [];
+        }
+
         _installedCommit = _installer.ReadInstalled()?.CommitId;
 
         Rows.Clear();
         foreach (var commit in commits)
         {
             records.TryGetValue(commit.CommitId, out var record);
+            claims.TryGetValue(commit.Ordinal.ToString(), out var claimedBy);
+
             Rows.Add(new CommitRowViewModel
             {
                 Commit = commit,
                 Record = record,
                 IsWorkspace = commit.CommitId == WorkspaceCommit,
                 IsInstalled = commit.CommitId == _installedCommit,
-                ClaimedBy = _store.ActiveClaimBy(commit.Ordinal.ToString(), ClaimMaxAge)
+                ClaimedBy = claimedBy
             });
         }
 
@@ -602,10 +614,18 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (!_store.IsReachable)
+        if (!_store.IsConfigured)
         {
-            SetStatus(StatusKind.Warning, "Binary share not reachable",
-                $"Cannot see {_config.PublishRoot}. Check that Syncthing is running.");
+            SetStatus(StatusKind.Error, "No bucket configured for this project",
+                "Fill in the \"storage\" block in Tools/unhingedsync.json, then check it with " +
+                "UnhingedSync.exe --storagetest.");
+            return;
+        }
+
+        if (!_store.LastKnownReachable)
+        {
+            SetStatus(StatusKind.Warning, "Could not reach the build store",
+                $"{_store.Description} did not answer. Check your connection, then press Refresh.");
             return;
         }
 

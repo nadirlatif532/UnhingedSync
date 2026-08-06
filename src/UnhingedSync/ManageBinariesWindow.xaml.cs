@@ -33,12 +33,7 @@ public sealed class BinaryRow : INotifyPropertyChanged
     public string SizeText => Bytes > 0 ? $"{Bytes / 1024.0 / 1024.0:0.#} MB" : "unknown";
     public string BuiltText => Record.BuiltUtc is { } d ? d.ToLocalTime().ToString("MMM d, HH:mm") : "";
 
-    public string StateText => Record.Status switch
-    {
-        "syncing" => "syncing",
-        _ when IsInstalled => "installed",
-        _ => "available"
-    };
+    public string StateText => IsInstalled ? "installed" : "available";
 
     public string Tooltip
     {
@@ -46,7 +41,6 @@ public sealed class BinaryRow : INotifyPropertyChanged
         {
             var lines = new List<string> { Record.CommitId };
             if (IsInstalled) lines.Add("These are the binaries you currently have installed");
-            if (Record.Status == "syncing") lines.Add("Still replicating to this machine");
             if (ClaimedBy is not null) lines.Add($"{ClaimedBy} is building this commit right now");
             if (!string.IsNullOrEmpty(Record.EngineVersion))
                 lines.Add($"Engine {Record.EngineVersion} (BuildId {Record.EngineBuildId})");
@@ -86,7 +80,6 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
     private readonly AppConfig _config;
     private readonly BuildStore _store;
     private readonly BinaryInstaller _installer;
-    private readonly SyncthingClient _syncthing = new();
     private readonly int _retainBuilds;
     private readonly ObservableCollection<BinaryRow> _rows = [];
 
@@ -118,55 +111,47 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         KeepLastButton.Content = $"Clean Up: Keep Newest {_retainBuilds}";
 
         Rows.ItemsSource = _rows;
-        Load();
 
-        Loaded += async (_, _) => await ApplySharePolicyAsync();
+        // Both are network calls now, so they belong in Loaded rather than the constructor.
+        Loaded += async (_, _) =>
+        {
+            await LoadAsync();
+            await ApplySharePolicyAsync();
+        };
     }
 
     /// <summary>
-    /// Decides whether deleting here reaches the team, and says so plainly either way.
-    /// Until this resolves the delete controls stay disabled, so a fast click cannot beat
-    /// the check.
-    /// </summary>
-    /// <summary>
-    /// The resolved verdict, kept so a test can assert that CanDelete is never true without
-    /// a confirmed writable share.
+    /// Kept so a test can assert the delete controls are never live without a store that can
+    /// actually be written to.
     /// </summary>
     internal bool PolicyConfirmedWritable { get; private set; }
 
+    /// <summary>
+    /// Decides whether deleting is offered at all, and says plainly what it does.
+    ///
+    /// This used to consult Syncthing's folder type, because on a receive-only folder a
+    /// deletion reached nobody and stranded the machine. With a single bucket and one
+    /// credential there is no such distinction to make: a delete is a delete, for everyone.
+    /// The confirmation is therefore a guard against mistakes, not against people, and the
+    /// wording says so rather than implying a permission that does not exist.
+    /// </summary>
     internal async Task ApplySharePolicyAsync()
     {
-        var info = await ShareRole.ResolveAsync(_syncthing, _config.SyncthingFolderId);
-        PolicyConfirmedWritable = info.WritesReachTeam;
+        // Not actually async any more, but kept awaitable: callers already await it and the
+        // signature is what the UI test drives.
+        await Task.CompletedTask;
 
-        if (!info.SyncthingReachable || info.FolderType.Length == 0)
+        PolicyConfirmedWritable = _store.IsConfigured;
+
+        if (!_store.IsConfigured)
         {
             CanDelete = false;
             ScopeBanner.Background = Brush("#352C18");
             ScopeBanner.BorderBrush = Brush("#7A6229");
-            ScopeHeadline.Text = "Cannot confirm what this machine is allowed to do";
-            ScopeDetail.Text = info.SyncthingReachable
-                ? $"Syncthing is running but has no folder called '{_config.SyncthingFolderId}', so " +
-                  "there is nothing here it is replicating. Run the Syncthing setup from the Sharing " +
-                  "window."
-                : "Syncthing could not be reached, so there is no way to know whether deleting here " +
-                  "would free space for the team or only on this machine. Deleting stays disabled " +
-                  "until it can be confirmed, because guessing wrong deletes your only copy and " +
-                  "helps nobody. Start Syncthing, or run its setup from the Sharing window.";
-        }
-        else if (!info.WritesReachTeam)
-        {
-            CanDelete = false;
-            ScopeBanner.Background = Brush("#1C2735");
-            ScopeBanner.BorderBrush = Brush("#35597F");
-            ScopeHeadline.Text = "This machine receives builds only, so deleting is disabled";
+            ScopeHeadline.Text = "No bucket is configured for this project";
             ScopeDetail.Text =
-                $"The shared folder is set to {info.FolderType} " +
-                "here, which is how artist machines are set up. Syncthing does not send local " +
-                "deletions from a receive-only folder, so removing a build would free space on " +
-                "this machine alone, mark the folder permanently out of sync, and offer a Revert " +
-                "button that downloads everything straight back. Ask a programmer or the build " +
-                "host to clean up instead.";
+                "Fill in the \"storage\" block in Tools/unhingedsync.json, then check it with " +
+                "UnhingedSync.exe --storagetest. There is nothing to manage until then.";
         }
         else
         {
@@ -175,9 +160,9 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
             ScopeBanner.BorderBrush = Brush("#7A6229");
             ScopeHeadline.Text = "Deleting here removes builds for the whole team";
             ScopeDetail.Text =
-                "This folder is replicated by Syncthing, and this machine sends changes, so a " +
-                "deletion propagates to everyone. Anyone who still needs one of these commits " +
-                "would have to compile it again.";
+                $"These live in {_store.Description}, so a deletion is immediate and affects " +
+                "everyone. Anyone who still needs one of these commits would have to compile it " +
+                "again.";
         }
 
         UpdateSummary();
@@ -186,30 +171,37 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
     private static System.Windows.Media.Brush Brush(string hex) =>
         (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFrom(hex)!;
 
-    private void Load()
+    private async Task LoadAsync()
     {
         var installed = _installer.ReadInstalled()?.CommitId;
 
+        List<Models.BuildRecord> records;
+        try
+        {
+            records = await _store.ReadAllAsync();
+        }
+        catch (Exception e)
+        {
+            _rows.Clear();
+            SummaryText.Text = $"Could not read {_store.Description}: {e.Message}";
+            return;
+        }
+
         _rows.Clear();
 
-        // Anything with a zip on disk, which is also what retention counts. Filtering to
-        // status == success alone would hide a still-replicating build from the list while
-        // retention kept counting it, and "keep newest 10" would then delete one build too
-        // many.
-        foreach (var record in _store.ReadAll()
+        // Anything still holding a payload. A record whose zip has been deleted reconciles
+        // to expired with no ZipName, so this is exactly the set retention counts.
+        foreach (var record in records
                      .Where(r => !string.IsNullOrEmpty(r.ZipName))
                      .OrderByDescending(r => r.CommitOrdinal))
         {
-            var row = new BinaryRow(
-                record,
-                _store.ActualZipBytes(record),
-                record.CommitId == installed,
-                _store.ActiveClaimBy(
-                    string.IsNullOrEmpty(record.CommitShort)
-                        ? record.CommitOrdinal.ToString()
-                        : record.CommitShort,
-                    ClaimMaxAge));
+            var claim = await _store.ActiveClaimByAsync(
+                string.IsNullOrEmpty(record.CommitShort)
+                    ? record.CommitOrdinal.ToString()
+                    : record.CommitShort,
+                ClaimMaxAge);
 
+            var row = new BinaryRow(record, record.ZipBytes, record.CommitId == installed, claim);
             row.PropertyChanged += (_, _) => UpdateSummary();
             _rows.Add(row);
         }
@@ -224,10 +216,10 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         var selectedMb = selected.Sum(r => r.Bytes) / 1024.0 / 1024.0;
 
         SummaryText.Text = _rows.Count == 0
-            ? _store.IsReachable
-                ? "No builds on disk yet."
-                : $"Cannot reach {_store.Root}."
-            : $"{_rows.Count} build(s) on disk, {totalMb:0.#} MB total" +
+            ? _store.IsConfigured
+                ? "Nothing published yet."
+                : "No bucket is configured for this project."
+            : $"{_rows.Count} build(s) published, {totalMb:0.#} MB total" +
               (selected.Count > 0 ? $". {selected.Count} selected, {selectedMb:0.#} MB" : "");
 
         DeleteButton.IsEnabled = CanDelete && selected.Count > 0;
@@ -247,19 +239,19 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
 
     private async void Refresh_Click(object sender, RoutedEventArgs e)
     {
-        Load();
+        await LoadAsync();
         await ApplySharePolicyAsync();
     }
 
-    private void DeleteSelected_Click(object sender, RoutedEventArgs e)
+    private async void DeleteSelected_Click(object sender, RoutedEventArgs e)
     {
         if (!CanDelete) return;
         var chosen = _rows.Where(r => r.IsSelected).ToList();
         if (chosen.Count == 0) return;
-        DeleteRows(chosen, $"Delete {chosen.Count} build(s)");
+        await DeleteRowsAsync(chosen, $"Delete {chosen.Count} build(s)");
     }
 
-    private void KeepLast_Click(object sender, RoutedEventArgs e)
+    private async void KeepLast_Click(object sender, RoutedEventArgs e)
     {
         if (!CanDelete) return;
 
@@ -269,10 +261,10 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         var toDelete = _rows.Skip(_retainBuilds).ToList();
         if (toDelete.Count == 0) return;
 
-        DeleteRows(toDelete, $"Keep the newest {_retainBuilds} and delete {toDelete.Count} older build(s)");
+        await DeleteRowsAsync(toDelete, $"Keep the newest {_retainBuilds} and delete {toDelete.Count} older build(s)");
     }
 
-    private void DeleteRows(List<BinaryRow> rows, string action)
+    private async Task DeleteRowsAsync(List<BinaryRow> rows, string action)
     {
         var mb = rows.Sum(r => r.Bytes) / 1024.0 / 1024.0;
 
@@ -286,10 +278,9 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
                          "right now, and deleting could collide with their publish.");
 
         var confirm = MessageBox.Show(this,
-            $"{action}, freeing {mb:0.#} MB.\n\n" +
-            "This is the shared Syncthing folder, so deleting here removes these builds for " +
-            "everyone on the team. Anyone who still needs one of these commits would have to " +
-            "compile it again.\n\n" +
+            $"{action}, freeing {mb:0.#} MB in {_store.Description}.\n\n" +
+            "This deletes them from the shared bucket, so they are gone for everyone on the " +
+            "team. Anyone who still needs one of these commits would have to compile it again.\n\n" +
             (warnings.Count > 0 ? string.Join("\n\n", warnings) + "\n\n" : "") +
             "Continue?",
             "Delete shared builds", MessageBoxButton.YesNo, MessageBoxImage.Warning);
@@ -298,9 +289,9 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         var failures = new List<string>();
         foreach (var row in rows)
         {
-            // Never throws, so one zip held open by Syncthing mid-transfer no longer takes
-            // the app down partway through, leaving the user guessing which ones went.
-            if (_store.DeletePayload(row.Record) is { } error)
+            // Never throws, so one failed delete cannot abandon a multi-build clean up
+            // halfway and leave the user guessing which ones went.
+            if (await _store.DeletePayloadAsync(row.Record) is { } error)
                 failures.Add($"{row.CommitLabel}: {error}");
             else
                 _rows.Remove(row);
@@ -312,8 +303,7 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         {
             MessageBox.Show(this,
                 $"{rows.Count - failures.Count} of {rows.Count} deleted. These could not be " +
-                $"removed, usually because Syncthing is still sending them:\n\n" +
-                string.Join("\n", failures) + "\n\nTry again in a moment.",
+                "removed:\n\n" + string.Join("\n", failures) + "\n\nTry again in a moment.",
                 "Some builds could not be deleted", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }

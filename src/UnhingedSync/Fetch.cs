@@ -20,17 +20,20 @@ public static class Fetch
         {
             var config = ConfigLoader.Load();
             var engine = EngineLocator.Locate(config);
-            var store = new BuildStore(config);
+            using var store = new BuildStore(config);
 
-            if (!store.IsReachable)
+            if (!store.IsConfigured)
             {
-                Report(false, $"Publish root is not reachable: {store.Root}");
+                Report(false,
+                    "No object store is configured for this project. Fill in the \"storage\" " +
+                    "block in Tools/unhingedsync.json, then run --storagetest.");
                 return 1;
             }
 
             commitId ??= await new DvCli(config.ProjectRoot).GetWorkspaceCommitAsync();
 
-            var record = store.ReadAll().FirstOrDefault(r => r.CommitId == commitId);
+            var records = await store.ReadAllAsync();
+            var record = records.FirstOrDefault(r => r.CommitId == commitId);
             if (record is null)
             {
                 Report(false, $"No build record published for {commitId}.");
@@ -42,7 +45,7 @@ public static class Fetch
                 return 1;
             }
 
-            var zip = store.ZipPathFor(record)!;
+            var zip = await store.EnsureLocalZipAsync(record, log);
             await new BinaryInstaller(config).InstallAsync(record, engine, zip, log);
 
             Report(true, $"Installed {record.FileCount} files for {commitId}.", new
