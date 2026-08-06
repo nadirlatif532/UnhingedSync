@@ -107,6 +107,8 @@
         <Button Content="Refresh" Command="{Binding RefreshCommand}" />
         <Button Content="Sharing…" Click="Sharing_Click"
                 ToolTip="Syncthing pairing: your device ID, invite a teammate, and accept requests — without leaving this app." />
+        <Button Content="Manage Binaries…" Click="ManageBinaries_Click"
+                ToolTip="See every published build, delete individual ones, or keep only the newest few. This is the shared folder — deletions affect the whole team." />
         <Button Content="Fetch Selected" Command="{Binding FetchSelectedCommand}"
                 ToolTip="Install the binaries published for the selected commit." />
       </StackPanel>
@@ -116,6 +118,8 @@
                 ToolTip="Compile this commit here instead of downloading it. Slower, but it leaves PDBs on your disk — the only way to get symbols you can debug with. PDBs are never published." />
         <Button Content="Build Log" Command="{Binding OpenLogCommand}"
                 ToolTip="Open the published build log for the selected commit." />
+        <Button Content="Copy Diagnostics" Command="{Binding CopyDiagnosticsCommand}"
+                ToolTip="Copies version, engine, project and recent log details to the clipboard — paste this when reporting a problem." />
         <Button Content="Open Editor" Command="{Binding OpenEditorCommand}" Margin="0" />
       </StackPanel>
     </Grid>

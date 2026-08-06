@@ -31,7 +31,7 @@ public sealed class LocalBuilder(AppConfig config)
         if (EmbeddedScripts.Missing() is { Count: > 0 } missing)
             return new(false, $"This build of the app is missing its own scripts ({string.Join(", ", missing)}). Reinstall it.");
 
-        if (FindPowerShell() is null)
+        if (PowerShellLocator.Find() is null)
             return new(false, "PowerShell 7 (pwsh) was not found on this machine.");
 
         var buildBat = Path.Combine(engine.InstallDir, "Engine", "Build", "BatchFiles", "Build.bat");
@@ -78,24 +78,6 @@ public sealed class LocalBuilder(AppConfig config)
         return false;
     }
 
-    private static string? FindPowerShell()
-    {
-        foreach (var name in new[] { "pwsh.exe", "powershell.exe" })
-        {
-            var pathVar = Environment.GetEnvironmentVariable("PATH") ?? "";
-            foreach (var dir in pathVar.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            {
-                try
-                {
-                    var probe = Path.Combine(dir.Trim(), name);
-                    if (File.Exists(probe)) return probe;
-                }
-                catch (ArgumentException) { }
-            }
-        }
-        return null;
-    }
-
     /// <summary>
     /// Compiles and publishes the binaries. PDBs are produced by the compile as a
     /// matter of course and stay on this machine -- they are never published, so a
@@ -115,8 +97,8 @@ public sealed class LocalBuilder(AppConfig config)
         IProgress<string> log,
         CancellationToken ct = default)
     {
-        var shell = FindPowerShell()
-            ?? throw new InvalidOperationException("PowerShell was not found on this machine.");
+        var shell = PowerShellLocator.Find()
+            ?? throw new InvalidOperationException("PowerShell 7 (pwsh) was not found on this machine.");
 
         // The app has already synced, so the script must not touch the workspace.
         var psi = new ProcessStartInfo

@@ -144,6 +144,17 @@ public static class ConfigLoader
     public static void SetDismissedUpdateVersion(string version) =>
         SaveLocalSetting("dismissedUpdateVersion", version);
 
+    /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
+    public static bool GetDeclinedPowerShellInstall() =>
+        ReadLocalJson()?["declinedPowerShellInstall"]?.GetValue<bool>() ?? false;
+
+    public static void SetDeclinedPowerShellInstall(bool value)
+    {
+        var root = ReadLocalJson() ?? new JsonObject();
+        root["declinedPowerShellInstall"] = value;
+        WriteLocalJson(root);
+    }
+
     /// <summary>Pass an empty engineDir to go back to resolving from the .uproject.</summary>
     public static void SetEngineOverride(string projectRoot, string engineDir)
     {

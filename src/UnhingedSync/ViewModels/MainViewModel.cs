@@ -61,6 +61,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         OpenEditorCommand = new RelayCommand(OpenEditorAsync, () => !IsBusy);
         BuildLocallyCommand = new RelayCommand(BuildLocallyAsync, () => !IsBusy);
         OpenLogCommand = new RelayCommand(OpenLogAsync, () => !IsBusy && SelectedRow?.Record?.LogName is not null);
+        CopyDiagnosticsCommand = new RelayCommand(CopyDiagnosticsAsync, () => true);
 
         BuildEngineOptions();
     }
@@ -169,6 +170,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public RelayCommand OpenEditorCommand { get; }
     public RelayCommand BuildLocallyCommand { get; }
     public RelayCommand OpenLogCommand { get; }
+    public RelayCommand CopyDiagnosticsCommand { get; }
 
     // ---------------------------------------------------------------- operations
 
@@ -400,6 +402,42 @@ public sealed class MainViewModel : INotifyPropertyChanged
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         else
             _log.Report("That build log is no longer available.");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// One click, everything worth pasting into a bug report: version, engine, project,
+    /// publish-root reachability, whether PowerShell is even findable, current status,
+    /// and the recent log. Faster than a screenshot of a stack trace, and doesn't miss
+    /// details a screenshot would crop out.
+    /// </summary>
+    private Task CopyDiagnosticsAsync()
+    {
+        var text = string.Join(Environment.NewLine, new[]
+        {
+            $"Unhinged Sync v{EmbeddedScripts.Version}",
+            $"Machine: {Environment.MachineName} ({Environment.OSVersion.VersionString})",
+            $"Project: {_config.ProjectName} ({_config.ProjectRoot})",
+            $"Branch: {Branch}   Workspace: {WorkspaceCommit}   Installed: {InstalledCommitText}",
+            $"Engine: {EngineText}   Dir: {_engine.InstallDir}",
+            $"Publish root: {_config.PublishRoot} (reachable: {_store.IsReachable})",
+            $"PowerShell: {PowerShellLocator.Find() ?? "NOT FOUND"}",
+            $"Status: {StatusHeadline} — {StatusDetail}",
+            "",
+            "-- recent log --",
+            LogText
+        });
+
+        try
+        {
+            Clipboard.SetText(text);
+            _log.Report("Diagnostics copied to clipboard.");
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            _log.Report("Could not reach the clipboard — try again.");
+        }
+
         return Task.CompletedTask;
     }
 

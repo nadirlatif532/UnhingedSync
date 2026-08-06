@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Input;
 using UnhingedSync.Services;
 using Microsoft.Win32;
 
@@ -53,6 +54,7 @@ public partial class App : Application
         try
         {
             UpdateChecker.CleanUpAfterRelaunch();
+            await EnsurePowerShellAsync();
             if (!EnsureAtLeastOneProject()) { Shutdown(1); return; }
             if (!EnsurePublishRoot()) { Shutdown(1); return; }
             new MainWindow().Show();
@@ -69,6 +71,47 @@ public partial class App : Application
                 MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
+    }
+
+    /// <summary>
+    /// PowerShell 7 (pwsh) runs every embedded script; Windows PowerShell 5.1 cannot --
+    /// it lacks the utf8NoBOM encoding these scripts write with, among other gaps, and
+    /// fails a few steps into a build or a Syncthing setup rather than up front. Catching
+    /// its absence here, once, with an offer to fix it, beats that confusion.
+    ///
+    /// Declining doesn't block the app: fetching and installing binaries someone else
+    /// already built needs no PowerShell at all. It just won't ask again this machine.
+    /// </summary>
+    private static async Task EnsurePowerShellAsync()
+    {
+        if (PowerShellLocator.IsAvailable) return;
+        if (ConfigLoader.GetDeclinedPowerShellInstall()) return;
+
+        var choice = MessageBox.Show(
+            "PowerShell 7 was not found on this machine.\n\n" +
+            "It's required to build binaries locally and to run Syncthing setup from this " +
+            "app. Fetching and installing binaries someone else already built still works " +
+            "fine without it.\n\n" +
+            "Install PowerShell 7 now?",
+            "PowerShell 7 not found", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+
+        if (choice != MessageBoxResult.Yes)
+        {
+            ConfigLoader.SetDeclinedPowerShellInstall(true);
+            return;
+        }
+
+        Mouse.OverrideCursor = Cursors.Wait;
+        bool installed;
+        try { installed = await PowerShellLocator.InstallAsync(); }
+        finally { Mouse.OverrideCursor = null; }
+
+        MessageBox.Show(
+            installed
+                ? "PowerShell 7 is installed."
+                : "Could not install it automatically. Install it from https://aka.ms/powershell and try again.",
+            "PowerShell 7", MessageBoxButton.OK,
+            installed ? MessageBoxImage.Information : MessageBoxImage.Warning);
     }
 
     /// <summary>

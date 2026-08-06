@@ -70,6 +70,12 @@ public static class UiTest
                 var window = new PeersWindow(config);
                 Realise(window);
             });
+
+            Check("ManageBinariesWindow", () =>
+            {
+                var window = new ManageBinariesWindow(config);
+                Realise(window);
+            });
         }
 
         Check("ComboBox", () =>

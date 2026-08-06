@@ -1,0 +1,98 @@
+<Window x:Class="UnhingedSync.ManageBinariesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Manage Binaries" Height="560" Width="700"
+        MinHeight="420" MinWidth="560"
+        Background="{StaticResource Bg}"
+        WindowStartupLocation="CenterOwner">
+
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- ── warning ────────────────────────────────────────────── -->
+    <Border Grid.Row="0" CornerRadius="6" Padding="14,11" Margin="0,0,0,12"
+            Background="#352C18" BorderBrush="#7A6229" BorderThickness="1">
+      <TextBlock TextWrapping="Wrap" Foreground="{StaticResource Text}">
+        This folder is replicated by Syncthing. Deleting a build here removes it for
+        <Run FontWeight="SemiBold">everyone on the team</Run>, not just this machine —
+        the same thing that happens automatically after every publish, just on demand.
+      </TextBlock>
+    </Border>
+
+    <!-- ── actions ────────────────────────────────────────────── -->
+    <Grid Grid.Row="1" Margin="0,0,0,10">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel Grid.Column="0" Orientation="Horizontal">
+        <Button Content="Select All" Click="SelectAll_Click" />
+        <Button Content="Select None" Click="SelectNone_Click" />
+      </StackPanel>
+
+      <StackPanel Grid.Column="2" Orientation="Horizontal">
+        <Button x:Name="KeepLastButton" Content="Clean Up — Keep Newest N" Click="KeepLast_Click" />
+        <Button x:Name="DeleteButton" Content="Delete Selected" Click="DeleteSelected_Click"
+                IsEnabled="False" Margin="0" />
+      </StackPanel>
+    </Grid>
+
+    <!-- ── list ───────────────────────────────────────────────── -->
+    <Border Grid.Row="2" Background="{StaticResource Panel}" CornerRadius="6"
+            BorderBrush="{StaticResource Border}" BorderThickness="1">
+      <DataGrid x:Name="Rows" AutoGenerateColumns="False" IsReadOnly="False"
+                HeadersVisibility="Column" GridLinesVisibility="None"
+                Background="Transparent" BorderThickness="0"
+                RowBackground="Transparent" AlternatingRowBackground="#1A1A1E"
+                Foreground="{StaticResource Text}"
+                SelectionMode="Extended" CanUserResizeRows="False"
+                VerticalScrollBarVisibility="Auto"
+                RowHeight="30" Margin="2">
+
+        <DataGrid.ColumnHeaderStyle>
+          <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{StaticResource PanelAlt}" />
+            <Setter Property="Foreground" Value="{StaticResource TextDim}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Border}" />
+            <Setter Property="BorderThickness" Value="0,0,0,1" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+          </Style>
+        </DataGrid.ColumnHeaderStyle>
+
+        <DataGrid.RowStyle>
+          <Style TargetType="DataGridRow">
+            <Setter Property="Foreground" Value="{StaticResource Text}" />
+          </Style>
+        </DataGrid.RowStyle>
+
+        <DataGrid.Columns>
+          <DataGridCheckBoxColumn Header="" Width="34" Binding="{Binding IsSelected, Mode=TwoWay}" />
+          <DataGridTextColumn Header="COMMIT" Binding="{Binding CommitLabel}" Width="80" IsReadOnly="True" />
+          <DataGridTextColumn Header="SIZE" Binding="{Binding SizeText}" Width="90" IsReadOnly="True" />
+          <DataGridTextColumn Header="BUILT" Binding="{Binding BuiltText}" Width="140" IsReadOnly="True" />
+          <DataGridTextColumn Header="BUILT BY" Binding="{Binding BuiltBy}" Width="*" IsReadOnly="True" />
+        </DataGrid.Columns>
+      </DataGrid>
+    </Border>
+
+    <!-- ── footer ─────────────────────────────────────────────── -->
+    <Grid Grid.Row="3" Margin="0,12,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBlock x:Name="SummaryText" Grid.Column="0" Style="{StaticResource Label}"
+                 VerticalAlignment="Center" TextWrapping="Wrap" />
+      <Button Grid.Column="1" Content="Close" Click="Close_Click" Margin="0" />
+    </Grid>
+  </Grid>
+</Window>

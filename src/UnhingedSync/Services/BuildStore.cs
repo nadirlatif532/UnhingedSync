@@ -81,6 +81,22 @@ public sealed class BuildStore(AppConfig config)
     public string? LogPathFor(BuildRecord record) =>
         string.IsNullOrEmpty(record.LogName) ? null : Path.Combine(_root, record.LogName);
 
+    /// <summary>
+    /// Deletes a build's zip and log from the publish root, freeing space for the whole
+    /// team -- this folder is replicated by Syncthing, so the deletion propagates to
+    /// every peer, the same as the build script's own retention pass. The record file is
+    /// left alone; every reader already treats "success record, zip missing" as expired,
+    /// so nothing else needs to change for the deletion to show up correctly everywhere.
+    /// </summary>
+    public void DeletePayload(BuildRecord record)
+    {
+        var zip = ZipPathFor(record);
+        if (zip is not null && File.Exists(zip)) File.Delete(zip);
+
+        var log = LogPathFor(record);
+        if (log is not null && File.Exists(log)) File.Delete(log);
+    }
+
     /// <summary>Another machine currently building this commit, if any.</summary>
     public string? ActiveClaimBy(string commitShort, TimeSpan maxAge)
     {

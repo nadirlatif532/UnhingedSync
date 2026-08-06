@@ -13,9 +13,59 @@ if not exist "%SCRIPT%" (
     goto :fail
 )
 
-rem PowerShell 7 if present, otherwise Windows PowerShell.
-set "PS=pwsh"
-where pwsh >nul 2>&1 || set "PS=powershell"
+rem PowerShell 7 is required -- Windows PowerShell 5.1 cannot run this script (it lacks
+rem the utf8NoBOM encoding this script writes with, among other gaps) and would fail
+rem confusingly partway through setup instead of up front.
+where pwsh >nul 2>&1
+if not errorlevel 1 (
+    set "PS=pwsh"
+    goto :havepwsh
+)
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" (
+    set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    goto :havepwsh
+)
+
+echo.
+echo   PowerShell 7 is required and was not found on this machine.
+echo   Windows PowerShell 5.1 cannot run this script correctly.
+echo.
+set "INSTALLPS="
+set /p "INSTALLPS=  Install PowerShell 7 now via winget? [Y/N]: "
+if /i not "!INSTALLPS!"=="Y" (
+    echo.
+    echo   Cannot continue without PowerShell 7. Install it from https://aka.ms/powershell
+    echo   and run this script again.
+    goto :fail
+)
+
+where winget >nul 2>&1
+if errorlevel 1 (
+    echo   winget is not available on this machine either. Install PowerShell 7 manually
+    echo   from https://aka.ms/powershell, then run this script again.
+    goto :fail
+)
+
+echo.
+echo   Installing PowerShell 7 - this can take a minute...
+winget install --id Microsoft.PowerShell --source winget --accept-package-agreements --accept-source-agreements -e
+
+where pwsh >nul 2>&1
+if not errorlevel 1 (
+    set "PS=pwsh"
+    goto :havepwsh
+)
+if exist "%ProgramFiles%\PowerShell\7\pwsh.exe" (
+    set "PS=%ProgramFiles%\PowerShell\7\pwsh.exe"
+    goto :havepwsh
+)
+
+echo.
+echo   Install finished but pwsh still cannot be found. Open a new terminal and run
+echo   this script again - PATH needs a fresh session to pick it up.
+goto :fail
+
+:havepwsh
 
 if not "%~1"=="" (
     "%PS%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%" %*

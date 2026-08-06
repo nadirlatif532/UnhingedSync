@@ -17,6 +17,15 @@ public partial class ProjectView : UserControl
         new PeersWindow(ViewModel.Config) { Owner = Window.GetWindow(this) }.ShowDialog();
     }
 
+    private async void ManageBinaries_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel is null) return;
+        new ManageBinariesWindow(ViewModel.Config) { Owner = Window.GetWindow(this) }.ShowDialog();
+
+        // Deletions there can change what this project's own list considers expired.
+        await ViewModel.RefreshAsync();
+    }
+
     private void LogBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         // Keep the newest output in view while a long build streams in.
