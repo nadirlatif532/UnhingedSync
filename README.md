@@ -54,14 +54,15 @@ This assumes you already have Diversion running with the correct engine version.
    needs are inside it, so there is nothing to install for the app itself.
 2. Run `UnhingedSync.exe`. It asks one question: where your project folder is, meaning the
    folder that contains the `.uproject`.
-3. Open **Sharing...** and put your own name in **How you appear to others**, then press
+3. Open **Sharing...** and click "Run Syncthing Setup" and choose appropriate role. 
+4. Once that is done: put your own name in **How you appear to others**, then press
    **Rename**. Syncthing defaults this to your computer name, and a peer list full of
    entries like `DESKTOP-4B7QK2` tells nobody who is who.
-4. Copy your device ID and send it to whoever runs the share. When they add you, come back
+5. Copy your device ID and send it to whoever runs the share. When they add you, come back
    to this window, accept their request, and answer **yes** to *"is this your team's hub?"*.
-5. Press **Sync & Ensure Binaries**.
+6. Press **Sync & Ensure Binaries**.
 
-Steps 1 to 4 happen once per machine. Step 5 is the daily routine.
+Steps 1 to 4 happen once per machine. Step 6 is the daily routine.
 
 If you are going to compile, also say yes when the app offers to install PowerShell 7.
 
