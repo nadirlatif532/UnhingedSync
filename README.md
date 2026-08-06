@@ -24,11 +24,11 @@ account.
 
 ## How it works
 
-1. A programmer presses **Sync & Ensure Binaries**. No binaries exist for the current
-   commit, so the tool compiles them locally and publishes a zip into a shared folder.
+1. A programmer presses **Build Locally**. It compiles the current commit and publishes a zip
+   into a shared folder.
 2. Syncthing replicates that folder to everyone on the team.
-3. An artist presses the same button. Binaries already exist, so the tool installs them
-   and never compiles anything.
+3. Everyone else presses **Sync & Ensure Binaries**. Binaries already exist, so the tool
+   installs them and never compiles anything.
 
 The shared folder is the only moving part. There is no database and no server.
 
@@ -62,7 +62,7 @@ This assumes you already have Diversion running with the correct engine version.
    to this window, accept their request, and answer **yes** to *"is this your team's hub?"*.
 6. Press **Sync & Ensure Binaries**.
 
-Steps 1 to 4 happen once per machine. Step 6 is the daily routine.
+Steps 1 to 5 happen once per machine. Step 6 is the daily routine.
 
 If you are going to compile, also say yes when the app offers to install PowerShell 7.
 
@@ -71,13 +71,12 @@ If you are going to compile, also say yes when the app offers to install PowerSh
 Someone has to publish the first build and act as the hub that everyone else pairs with.
 That machine should be a programmer's machine or a dedicated build box.
 
-1. Do the seven steps above.
-2. Open **Sharing...** and run the Syncthing setup, choosing **Programmer** or
-   **Dedicated build machine**.
+1. Do the six steps above, choosing **Programmer** or **Dedicated build machine** as the
+   role in step 3.
+2. Press **Build Locally** to compile and publish the first build. **Sync & Ensure Binaries**
+   deliberately will not do this for you, for the reason in *Daily usage* below.
 3. Press **Offer the folder to every peer** whenever somebody new joins. There is nothing to
    switch on to "become" the hub, and the reason is explained below.
-4. Press **Sync & Ensure Binaries**. Since nothing is published yet, this compiles and
-   publishes the first build.
 5. Commit `Tools/unhingedsync.json` to Diversion. This is important: it is how the whole
    team agrees on the editor target and, critically, on the Syncthing folder ID.
 6. Send teammates the zip and your device ID.
@@ -120,19 +119,24 @@ whenever somebody new joins.
 Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
 joiners have nobody to pair with until someone else is promoted.
 
-Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
-joiners have nobody to pair with until someone else is promoted.
-
 ## Daily usage
 
 **Sync & Ensure Binaries** is the whole job:
 
 1. Pulls the latest commit from Diversion.
 2. Looks for published binaries matching that commit and your engine.
-3. If found, installs them.
-4. If not found, compiles locally and publishes, but only if the build succeeds.
-5. If this machine cannot build, it says so and tells you who to wait for. It never
-   installs mismatched binaries.
+3. If found, installs them. It never installs mismatched binaries.
+4. If not found, it stops and tells you why, including how far along your copy of the share
+   is. It does **not** compile.
+
+**It will never build for you, and that is deliberate.** Compiling on a miss makes this
+button succeed no matter what state the share is in, which hides the failure that actually
+matters. A thirty minute compile that ends in a working editor looks like success, so a share
+that is not replicating goes unnoticed until it reaches somebody who cannot compile at all.
+
+So when binaries are missing you get a dialog naming the likely cause. If your share is below
+100% the binaries have probably just not arrived yet, and waiting is the fix. If it is fully
+synced and this commit genuinely has not been published, press **Build Locally**.
 
 If someone else is already building that commit you are told, rather than duplicating 30
 minutes of work. Claims are best effort hints, because replication latency makes real

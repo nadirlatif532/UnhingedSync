@@ -106,7 +106,7 @@
         <Button Content="Sync &amp; Ensure Binaries"
                 Style="{StaticResource PrimaryButton}"
                 Command="{Binding SyncAndEnsureCommand}"
-                ToolTip="Pull the latest commit, then install matching binaries, building and publishing them here if nobody has yet." />
+                ToolTip="Pull the latest commit, then install the matching binaries. It never compiles: if none have been published it tells you why, so a share that is not syncing cannot hide behind a local build." />
         <Button Content="Refresh" Command="{Binding RefreshCommand}" />
         <Button Content="Sharing…" Click="Sharing_Click"
                 ToolTip="Syncthing pairing: your device ID, invite a teammate, and accept requests, without leaving this app." />

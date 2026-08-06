@@ -276,14 +276,16 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var record = FindUsableRecord(WorkspaceCommit);
             if (record is null)
             {
-                BusyText = "No binaries yet, building…";
-                record = await BuildPublishAndReloadAsync();
-                if (record is null) return;
+                // Deliberately does NOT build. Quietly compiling on a miss made this button
+                // succeed whatever the state of the share, which hid the failure that
+                // actually matters: replication not working, or nobody having published. A
+                // 30 minute compile that ends in a working editor looks like success, so the
+                // broken sync goes unnoticed until it bites somebody who cannot compile.
+                await ExplainMissingBinariesAsync();
+                return;
             }
-            else
-            {
-                _log.Report($"Found published binaries for {WorkspaceCommit} (built by {record.BuiltBy}).");
-            }
+
+            _log.Report($"Found published binaries for {WorkspaceCommit} (built by {record.BuiltBy}).");
 
             BusyText = "Installing binaries…";
             var zip = _store.ZipPathFor(record)!;
@@ -294,48 +296,66 @@ public sealed class MainViewModel : INotifyPropertyChanged
         });
     }
 
-    /// <summary>Returns the freshly published record, or null if we could not build.</summary>
-    private async Task<BuildRecord?> BuildPublishAndReloadAsync()
+    /// <summary>
+    /// Says why there are no binaries, and points at Build Locally rather than compiling.
+    ///
+    /// The distinction that matters: "nobody has built this" and "your share is not syncing"
+    /// look identical from here, and only one of them is your problem to solve by compiling.
+    /// So this reports the sync percentage, because a share sitting below 100% is the far
+    /// more likely explanation on a machine that has just been set up, and compiling would
+    /// paper straight over it.
+    /// </summary>
+    private async Task ExplainMissingBinariesAsync()
     {
         var commitShort = WorkspaceCommit.Replace("dv.commit.", "");
         var otherMachine = _store.ActiveClaimBy(commitShort, ClaimMaxAge);
+
         if (otherMachine is not null)
         {
-            _log.Report($"{otherMachine} is already building this commit. Waiting for them is usually faster " +
+            _log.Report($"{otherMachine} is building this commit right now. Waiting is usually faster " +
                         "than building it again. Press Refresh in a few minutes.");
             SetStatus(StatusKind.Warning,
                 $"{otherMachine} is building {WorkspaceCommit}",
-                "Press Refresh once they finish, then fetch the binaries.");
-            return null;
+                "Press Refresh once they finish, then press Sync & Ensure Binaries again.");
+            return;
         }
+
+        // How much of the share has actually arrived. Unknown is reported as unknown rather
+        // than guessed at, because the number is the whole point of showing it.
+        int? completion = null;
+        try { completion = await _syncthing.GetLocalCompletionAsync(_config.SyncthingFolderId); }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException) { }
+
+        var records = _store.ReadAll().Count;
+        var syncNote = completion switch
+        {
+            null => "Syncthing could not be reached, so the share may not be syncing at all.",
+            < 100 => $"Your copy of the share is {completion}% complete, so the binaries may " +
+                     "simply not have arrived yet. Give it a moment and press Refresh.",
+            _ => $"Your copy of the share is fully synced and holds {records} build record(s), " +
+                 "so this commit genuinely has not been published by anyone."
+        };
+
+        _log.Report($"No binaries published for {WorkspaceCommit}. {syncNote}");
 
         var capability = _builder.CanBuild(_engine);
-        if (!capability.CanBuild)
-        {
-            _log.Report($"Cannot build here: {capability.Reason}");
-            SetStatus(StatusKind.NeedsBinaries,
-                $"Nobody has built {WorkspaceCommit} yet",
-                capability.Reason);
-            return null;
-        }
 
-        _log.Report("No binaries published for this commit, so building locally. This takes a while.");
-        var result = await _builder.BuildAndPublishAsync(_log);
+        SetStatus(StatusKind.NeedsBinaries,
+            $"No binaries for {WorkspaceCommit}",
+            syncNote + (capability.CanBuild
+                ? " If it really has not been built, press Build Locally to compile and publish it."
+                : $" This machine cannot build: {capability.Reason}"));
 
-        if (!result.Succeeded)
-        {
-            _log.Report("Build failed. Nothing was published.");
-            SetStatus(StatusKind.Error,
-                "Local build failed",
-                "Nothing was published. See the log below for the compiler output.");
-            return null;
-        }
-
-        _log.Report($"Build succeeded and published {result.ZipName}.");
-        var record = FindUsableRecord(WorkspaceCommit);
-        if (record is null)
-            _log.Report("Published, but the record is not readable yet. Press Refresh in a moment.");
-        return record;
+        MessageBox.Show(
+            $"No binaries have been published for {WorkspaceCommit}.\n\n" +
+            syncNote + "\n\n" +
+            (capability.CanBuild
+                ? "This is not done for you automatically, because compiling on every miss hides " +
+                  "a share that is not syncing.\n\nIf you are sure nobody has built this commit, " +
+                  "press Build Locally to compile and publish it for the team."
+                : $"This machine cannot compile it either:\n{capability.Reason}\n\n" +
+                  "Ask a programmer to build this commit."),
+            "No binaries for this commit", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private async Task FetchSelectedAsync()
