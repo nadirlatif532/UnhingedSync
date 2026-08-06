@@ -55,12 +55,14 @@ building. The scripts refuse to run under it rather than failing halfway through
 3. Install the Unreal Engine version the project uses, through the Epic Games Launcher.
 4. Run `UnhingedSync.exe`. It asks one question: where your project folder is, meaning the
    folder that contains the `.uproject`.
-5. Open **Sharing...**, copy your device ID, and send it to whoever runs the share. When
-   they add you, come back to this window, accept their request, and answer **yes** to
-   *"is this your team's hub?"*.
-6. Press **Sync & Ensure Binaries**.
+5. Open **Sharing...** and put your own name in **How you appear to others**, then press
+   **Rename**. Syncthing defaults this to your computer name, and a peer list full of
+   entries like `DESKTOP-4B7QK2` tells nobody who is who.
+6. Copy your device ID and send it to whoever runs the share. When they add you, come back
+   to this window, accept their request, and answer **yes** to *"is this your team's hub?"*.
+7. Press **Sync & Ensure Binaries**.
 
-Steps 1 to 5 happen once per machine. Step 6 is the daily routine.
+Steps 1 to 6 happen once per machine. Step 7 is the daily routine.
 
 If you are going to compile, also say yes when the app offers to install PowerShell 7.
 
@@ -69,14 +71,16 @@ If you are going to compile, also say yes when the app offers to install PowerSh
 Someone has to publish the first build and act as the hub that everyone else pairs with.
 That machine should be a programmer's machine or a dedicated build box.
 
-1. Do the six steps above.
+1. Do the seven steps above.
 2. Open **Sharing...** and run the Syncthing setup, choosing **Programmer** or
    **Dedicated build machine**.
-3. Press **Sync & Ensure Binaries**. Since nothing is published yet, this compiles and
+3. Tick **This machine acts as the team's hub**, and accept the offer to send the folder to
+   every peer you know.
+4. Press **Sync & Ensure Binaries**. Since nothing is published yet, this compiles and
    publishes the first build.
-4. Commit `Tools/unhingedsync.json` to Diversion. This is important: it is how the whole
+5. Commit `Tools/unhingedsync.json` to Diversion. This is important: it is how the whole
    team agrees on the editor target and, critically, on the Syncthing folder ID.
-5. Send teammates the zip and your device ID.
+6. Send teammates the zip and your device ID.
 
 ### Onboarding 20 to 30 people: use a hub
 
@@ -95,6 +99,27 @@ Ticking that box also lets the hub offer you new folders, which is why only mach
 as programmer or build host are allowed to tick it. Everything stays peer to peer. The hub
 is only an address book, and once you have been introduced you sync builds directly with
 everyone else even when the hub is offline.
+
+### Managing hubs
+
+The **Sharing...** window lists every peer, shows which of them are hubs, and gives each one
+a **Make hub** or **Not a hub** button. Only a programmer or build host can use those,
+because promoting a peer means auto-accepting the devices it introduces and letting it
+create folders on your disk.
+
+A programmer can also tick **This machine acts as the team's hub**. Worth knowing exactly
+what that does, because the wording promises more than Syncthing can deliver: there is no
+"I am a hub" flag anywhere in Syncthing. The introducer bit lives on every *other* machine,
+so you become the hub only when teammates tick the box against your device ID. Declaring it
+on your own machine cannot make that happen.
+
+What it does do is record the intention, and offer the one step that genuinely is the hub
+owner's job: making sure every peer you know is actually being offered the binaries folder.
+Skip that and introductions spread contacts around the team without spreading any builds,
+which looks like everything is paired correctly while nobody receives anything.
+
+Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
+joiners have nobody to pair with until someone else is promoted.
 
 ## Daily usage
 
@@ -116,7 +141,7 @@ locking impossible, so a duplicate build is possible and harmless.
 | Button | What it does |
 |---|---|
 | **Refresh** | Re-reads Diversion and the shared folder. |
-| **Sharing...** | Syncthing pairing: your device ID, invite a teammate, accept requests. |
+| **Sharing...** | Syncthing pairing: your device ID, your display name, inviting teammates, accepting requests, and managing hubs. |
 | **Manage Binaries...** | See every published build and free up disk space. |
 | **Fetch Selected** | Installs a specific commit's binaries. Warns first if it does not match your workspace. |
 | **Build Locally** | Compiles here instead of downloading. This is how you get debuggable symbols. |
@@ -325,7 +350,10 @@ Unreal **bans** some shipped MSVC versions outright. See `BannedVisualCppVersion
 
 `%LOCALAPPDATA%\UnhingedSync\config.local.json` holds the publish root, the known project
 list, this machine's role, the per project engine choice, update check bookkeeping, and an
-optional `syncthingApiKey`.
+optional `syncthingApiKey`, and whether this machine acts as the hub.
+
+Your display name and which peers are hubs are **not** stored here. Those live in
+Syncthing's own configuration, because Syncthing is what acts on them.
 
 Environment overrides, useful for scripting: `UNHINGEDSYNC_PROJECT_ROOT` and
 `UNHINGEDSYNC_PUBLISH_ROOT`.
