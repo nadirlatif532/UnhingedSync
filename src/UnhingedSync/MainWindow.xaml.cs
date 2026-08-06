@@ -90,7 +90,7 @@ public partial class MainWindow : Window
 
         var confirm = MessageBox.Show(
             $"Remove this project from Unhinged Sync?\n\n{projectRoot}\n\n" +
-            "Nothing on disk is touched — you can add it back at any time.",
+            "Nothing on disk is touched, so you can add it back at any time.",
             "Close project", MessageBoxButton.OKCancel, MessageBoxImage.Question);
         if (confirm != MessageBoxResult.OK) return;
 

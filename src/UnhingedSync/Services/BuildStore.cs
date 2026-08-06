@@ -21,6 +21,26 @@ public sealed class BuildStore(AppConfig config)
     public bool IsReachable => Directory.Exists(_root);
 
     /// <summary>
+    /// Makes a commit stem safe to use as a search pattern.
+    ///
+    /// These values come out of JSON records that other machines write, so they are input,
+    /// not constants. A stem containing ':' makes EnumerateFiles throw ArgumentException
+    /// (which is not an IOException, so it escapes the usual handling); '..\' makes the glob
+    /// escape into the publish root; and '*' would match every log in the share. Commit
+    /// stems are ordinals or short hashes, so anything outside that is dropped rather than
+    /// escaped.
+    /// </summary>
+    private static string SafeStem(BuildRecord record)
+    {
+        var raw = string.IsNullOrEmpty(record.CommitShort)
+            ? record.CommitOrdinal.ToString()
+            : record.CommitShort;
+
+        var clean = new string(raw.Where(char.IsLetterOrDigit).ToArray());
+        return clean.Length == 0 ? "" : clean;
+    }
+
+    /// <summary>
     /// One entry per commit, newest first. Where several machines published the same
     /// commit, a usable build wins over a failed one.
     /// </summary>
@@ -117,17 +137,15 @@ public sealed class BuildStore(AppConfig config)
         // record we hold is only one of those, and retention sweeps them all -- matching
         // that here stops the other machine's log being orphaned forever, since no later
         // retention pass revisits a commit whose zip is already gone.
-        var stem = string.IsNullOrEmpty(record.CommitShort)
-            ? record.CommitOrdinal.ToString()
-            : record.CommitShort;
+        var stem = SafeStem(record);
 
-        if (Directory.Exists(LogsDir))
+        if (stem.Length > 0 && Directory.Exists(LogsDir))
         {
             try
             {
                 foreach (var log in Directory.EnumerateFiles(LogsDir, $"{stem}-*.log")) TryDelete(log);
             }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
             {
                 failures.Add($"logs: {e.Message}");
             }
@@ -154,9 +172,23 @@ public sealed class BuildStore(AppConfig config)
     public string? ActiveClaimBy(string commitShort, TimeSpan maxAge)
     {
         if (!Directory.Exists(ClaimsDir)) return null;
+
+        // Same reasoning as SafeStem: this is called with values derived from published
+        // records, and it now runs while a window is being constructed, so a malformed one
+        // must not be able to throw out of a constructor.
+        var stem = new string((commitShort ?? "").Where(char.IsLetterOrDigit).ToArray());
+        if (stem.Length == 0) return null;
+
         var mine = Environment.MachineName;
 
-        foreach (var file in Directory.EnumerateFiles(ClaimsDir, $"{commitShort}-*.claim"))
+        IEnumerable<string> claims;
+        try { claims = Directory.EnumerateFiles(ClaimsDir, $"{stem}-*.claim").ToList(); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+
+        foreach (var file in claims)
         {
             try
             {

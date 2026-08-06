@@ -15,6 +15,10 @@ public partial class PeersWindow : Window
         PendingKind Kind, string Title, string Subtitle,
         string DeviceId, string FolderId, string Label);
 
+    /// <summary>Shown in place of the device ID before one is known, and checked for
+    /// before letting Copy put it on the clipboard.</summary>
+    private const string NoDeviceId = "not available";
+
     private readonly AppConfig _config;
     private readonly SyncthingClient _syncthing = new();
     private bool _mayIntroduce;
@@ -43,7 +47,7 @@ public partial class PeersWindow : Window
                 _ => "Syncthing is not running"
             };
             StatusDetail.Text = status.Detail ?? "";
-            MyDeviceId.Text = "—";
+            MyDeviceId.Text = NoDeviceId;
             PendingList.ItemsSource = null;
             PeersList.ItemsSource = null;
             NoPending.Visibility = Visibility.Collapsed;
@@ -89,7 +93,7 @@ public partial class PeersWindow : Window
                 p.Name,
                 p.DeviceId,
                 ShareText = (p.SharesOurFolder
-                    ? $"Sharing the binaries folder — {p.CompletionPercent}% in sync with them"
+                    ? $"Sharing the binaries folder, {p.CompletionPercent}% in sync with them"
                     : "Connected, but not sharing the binaries folder yet")
                     + (p.IsIntroducer ? "   ·   hub (introduces others to you)" : "")
             }).ToList();
@@ -134,7 +138,7 @@ public partial class PeersWindow : Window
                 (isIntroducer
                     ? "Marked as your hub, so their other devices will be introduced to you automatically.\n\n"
                     : "") +
-                "They still have to accept on their side — until they do, nothing transfers.",
+                "They still have to accept on their side. Until they do, nothing transfers.",
                 "Invitation sent", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -159,11 +163,11 @@ public partial class PeersWindow : Window
             {
                 // Same policy as the checkbox: only a building machine may grant this.
                 var asHub = _mayIntroduce && MessageBox.Show(
-                    "Is this the machine that hosts the share for your team — the one everyone " +
+                    "Is this the machine that hosts the share for your team, the one everyone " +
                     "pairs with?\n\n" +
-                    "Yes — their other devices get introduced to you automatically, so you only " +
+                    "Yes: their other devices get introduced to you automatically, so you only " +
                     "ever pair once.\n" +
-                    "No  — treat them as an ordinary teammate.",
+                    "No: treat them as an ordinary teammate.",
                     "Is this your team's hub?",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
 
@@ -176,8 +180,8 @@ public partial class PeersWindow : Window
                 // is also what stops an artist's machine from pushing junk into the share.
                 var receiveOnly = MessageBox.Show(
                     "Will you build and publish binaries from this machine?\n\n" +
-                    "Yes — you can publish (programmers, build machines).\n" +
-                    "No  — receive only, which is right for artists and designers.",
+                    "Yes: you can publish (programmers, build machines).\n" +
+                    "No: receive only, which is right for artists and designers.",
                     "How should this machine use the folder?",
                     MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.No;
 
@@ -236,7 +240,7 @@ public partial class PeersWindow : Window
                 "artist" =>
                     "Only machines set up as programmer or build host can mark a hub as " +
                     "introducer. This one is set up as an artist, so it syncs with the peers " +
-                    "it is paired with — ask the hub owner to add you.",
+                    "it is paired with. Ask the hub owner to add you.",
                 _ =>
                     "Syncthing setup has not run on this machine yet, so its role is unknown. " +
                     "Run the setup first if you need to mark a hub as introducer."
@@ -250,7 +254,7 @@ public partial class PeersWindow : Window
 
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(MyDeviceId.Text) || MyDeviceId.Text == "—") return;
+        if (string.IsNullOrWhiteSpace(MyDeviceId.Text) || MyDeviceId.Text == NoDeviceId) return;
         try
         {
             Clipboard.SetText(MyDeviceId.Text);
@@ -259,7 +263,7 @@ public partial class PeersWindow : Window
         catch (System.Runtime.InteropServices.ExternalException)
         {
             // Another process can hold the clipboard open; not worth a dialog.
-            FolderStatus.Text = "Could not reach the clipboard — select the ID and copy it manually.";
+            FolderStatus.Text = "Could not reach the clipboard. Select the ID and copy it manually.";
         }
     }
 

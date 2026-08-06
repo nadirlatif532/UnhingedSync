@@ -87,7 +87,7 @@ public static class ConfigLoader
         if (!Directory.Exists(path)) return "That folder does not exist.";
 
         return Directory.EnumerateFiles(path, "*.uproject").Any()
-            ? "Unknown reason — it does contain a .uproject."
+            ? "Unknown reason. It does contain a .uproject."
             : "It contains no .uproject file, so it isn't the root of an Unreal project. " +
               "Pick the folder that has the .uproject in it, not a folder above or below it.";
     }
@@ -317,16 +317,24 @@ public static class ConfigLoader
 
     private static string ResolvePublishRoot(AppConfig config)
     {
+        // The explicit, deliberate override wins over everything, including Syncthing.
         var fromEnv = Environment.GetEnvironmentVariable("UNHINGEDSYNC_PUBLISH_ROOT");
         if (!string.IsNullOrWhiteSpace(fromEnv)) return fromEnv;
 
-        if (ReadLocalOverrides()?.PublishRoot is { Length: > 0 } configured) return configured;
-
-        // Ask Syncthing where it is actually replicating this project's folder. Without
-        // this the app could invent a path under the user profile while Syncthing synced
-        // somewhere else, and the only symptom was a permanently empty build list.
+        // Syncthing outranks the saved value, which is subtle but load-bearing.
+        //
+        // The saved value is not necessarily a choice anybody made: EnsurePublishRoot
+        // persists whatever was resolved on every startup, so a machine that once fell
+        // through to the default below has that default written down. Checking the saved
+        // value first therefore made this lookup unreachable on exactly the machines that
+        // needed it, and they carried on reading an empty folder while Syncthing
+        // replicated somewhere else. Whatever Syncthing is actually replicating is the
+        // only answer that can be right, and UNHINGEDSYNC_PUBLISH_ROOT above remains the
+        // way to say otherwise on purpose.
         if (SyncthingClient.TryGetFolderPathFromConfig(config.SyncthingFolderId) is { Length: > 0 } fromSyncthing)
-            return fromSyncthing;
+            return NormalisePath(fromSyncthing);
+
+        if (ReadLocalOverrides()?.PublishRoot is { Length: > 0 } configured) return configured;
 
         // The exe is normally distributed inside the replicated share itself, either at
         // its root or one level down (\App). Recognising both means a teammate can run
@@ -348,6 +356,39 @@ public static class ConfigLoader
         // can be found again when pointing Syncthing at it.
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "UnhingedShare");
+    }
+
+    /// <summary>
+    /// Turns a path as Syncthing stores it into one Windows APIs will accept.
+    ///
+    /// Syncthing keeps the folder path as the user typed it, which includes forms .NET does
+    /// not understand: "~/UnhingedShare" and forward slashes are both normal there and
+    /// Syncthing expands them itself. Passed through raw, "~\UnhingedShare" is not rooted,
+    /// so it would be resolved against the project and create a literal "~" folder inside
+    /// the Unreal workspace, which is the one location this whole resolver exists to avoid.
+    /// </summary>
+    public static string NormalisePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return path;
+
+        var expanded = path.Trim().Replace('/', Path.DirectorySeparatorChar);
+
+        if (expanded is "~" || expanded.StartsWith(@"~\", StringComparison.Ordinal))
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            expanded = expanded.Length <= 1 ? home : Path.Combine(home, expanded[2..]);
+        }
+
+        expanded = Environment.ExpandEnvironmentVariables(expanded);
+
+        try
+        {
+            return Path.IsPathRooted(expanded) ? Path.GetFullPath(expanded) : expanded;
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return expanded;
+        }
     }
 
     private static LocalOverrides? ReadLocalOverrides()

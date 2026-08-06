@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
     Resets this machine's Unhinged Sync setup so the first-run experience can be
@@ -39,6 +38,9 @@
     ./Reset-Ftue.ps1 -IncludeProjectConfig
     ./Reset-Ftue.ps1 -Restore
 #>
+
+# Must stay AFTER the help block above; anything before it stops Get-Help finding the help.
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string] $ProjectRoot,
@@ -142,17 +144,27 @@ if (Test-Path -LiteralPath $ScriptCache) {
     # the very folder being deleted. Deleting the file out from under the interpreter is
     # asking for trouble, so leave our own copy behind and let the next launch overwrite
     # it, which it does unconditionally.
-    $selfDir = $null
-    if ($PSCommandPath) { $selfDir = Split-Path -Parent $PSCommandPath }
-
-    $runningFromCache = $selfDir -and (
-        [System.IO.Path]::GetFullPath($selfDir).TrimEnd('\') -like
-        ([System.IO.Path]::GetFullPath($ScriptCache).TrimEnd('\') + '*'))
+    # StartsWith on a normalised path, not -like: a path containing '[' is a wildcard set to
+    # -like, and a bare prefix match would also treat '...\scriptsfoo' as inside '...\scripts'.
+    $runningFromCache = $false
+    if ($PSCommandPath) {
+        $selfDir = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSCommandPath)).TrimEnd('\')
+        $cacheDir = [System.IO.Path]::GetFullPath($ScriptCache).TrimEnd('\')
+        $runningFromCache = $selfDir -eq $cacheDir -or
+                            $selfDir.StartsWith($cacheDir + '\', [StringComparison]::OrdinalIgnoreCase)
+    }
 
     if ($runningFromCache) {
         Get-ChildItem -LiteralPath $ScriptCache -Recurse -Force -File |
             Where-Object { $_.FullName -ne $PSCommandPath } |
             Remove-Item -Force -ErrorAction SilentlyContinue
+
+        # Prune the version folders that just lost all their files, apart from ours.
+        Get-ChildItem -LiteralPath $ScriptCache -Recurse -Force -Directory |
+            Sort-Object { $_.FullName.Length } -Descending |
+            Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force -Recurse -File) } |
+            Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+
         Write-Ok 'Cleared the extracted script cache (kept this script, which is in use)'
     } else {
         Remove-Item -LiteralPath $ScriptCache -Recurse -Force

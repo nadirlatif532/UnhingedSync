@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
     Detects an internally inconsistent Unreal Engine install before a build wastes
@@ -34,6 +33,9 @@
     ./Test-EngineIntegrity.ps1
     ./Test-EngineIntegrity.ps1 -Sample 0
 #>
+
+# Must stay AFTER the help block above; anything before it stops Get-Help finding the help.
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [string] $EngineDir,

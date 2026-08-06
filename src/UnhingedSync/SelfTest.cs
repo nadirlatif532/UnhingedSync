@@ -40,6 +40,35 @@ public static class SelfTest
             Record("config.load", false, e.Message);
         }
 
+        // --- path normalisation -------------------------------------------------
+        // Syncthing stores folder paths as typed, so "~/UnhingedShare" and forward slashes
+        // both turn up. An unrooted result gets resolved against the project, which would
+        // create a literal "~" folder inside the Unreal workspace: the one location the
+        // whole publish-root resolver exists to avoid, because dv clean empties it.
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var cases = new (string Input, string Expected)[]
+            {
+                (@"~\UnhingedShare", Path.Combine(home, "UnhingedShare")),
+                ("~/UnhingedShare",  Path.Combine(home, "UnhingedShare")),
+                ("~",                home),
+                (@"C:/Share/sub",    @"C:\Share\sub")
+            };
+
+            var bad = cases
+                .Select(c => new { c.Input, c.Expected, Actual = ConfigLoader.NormalisePath(c.Input) })
+                .Where(r => !r.Actual.Equals(r.Expected, StringComparison.OrdinalIgnoreCase) ||
+                            !Path.IsPathRooted(r.Actual))
+                .ToList();
+
+            Record("paths.normalise", bad.Count == 0, bad.Count == 0 ? "all rooted and expanded" : bad);
+        }
+        catch (Exception e)
+        {
+            Record("paths.normalise", false, e.Message);
+        }
+
         // --- known projects -----------------------------------------------------
         try
         {

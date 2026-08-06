@@ -25,12 +25,17 @@ jobs:
       # forgotten bump ships a v1.1.0 release whose exe still reports 1.0.0, and every
       # teammate is offered the same update forever because installing it never changes
       # what they report.
+      # The tag reaches the script through the environment, never by interpolation. A tag is
+      # attacker-controllable text, and ${{ }} would paste it straight into a shell running
+      # with contents: write.
       - name: Derive version from tag
         id: version
         shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          $v = "${{ github.ref_name }}".TrimStart('v')
-          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag '${{ github.ref_name }}' is not vMAJOR.MINOR.PATCH" }
+          $v = $env:REF_NAME -replace '^v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "Tag '$env:REF_NAME' is not vMAJOR.MINOR.PATCH" }
           "value=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Building version $v"
 
@@ -43,11 +48,12 @@ jobs:
       # does not report the tagged version, the release is wrong and must not ship.
       - name: Verify stamped version
         shell: pwsh
+        env:
+          WANT: ${{ steps.version.outputs.value }}
         run: |
           $actual = (Get-Item dist/UnhingedSync.exe).VersionInfo.FileVersion
-          $want = "${{ steps.version.outputs.value }}"
-          Write-Host "exe reports $actual, tag says $want"
-          if (-not $actual.StartsWith($want)) { throw "Version mismatch: exe=$actual tag=$want" }
+          Write-Host "exe reports $actual, tag says $env:WANT"
+          if ($actual -ne "$env:WANT.0") { throw "Version mismatch: exe=$actual tag=$env:WANT" }
 
       - name: Zip
         shell: pwsh

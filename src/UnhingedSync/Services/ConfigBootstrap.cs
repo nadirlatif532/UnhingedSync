@@ -13,7 +13,7 @@ public sealed record BootstrapResult(string ConfigPath, bool Created, string Pro
 ///
 /// Everything is derived from the .uproject, and the file is written into the project's
 /// Tools folder so it can be committed and shared: the whole team then agrees on the
-/// editor target, the retention count and — critically — the Syncthing folder ID.
+/// editor target, the retention count and, critically, the Syncthing folder ID.
 /// </summary>
 public static class ConfigBootstrap
 {

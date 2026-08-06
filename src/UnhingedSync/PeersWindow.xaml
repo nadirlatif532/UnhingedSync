@@ -46,7 +46,7 @@
           <Button Grid.Column="1" Content="Copy" Margin="8,0,0,0" Click="Copy_Click" />
         </Grid>
         <TextBlock Foreground="{StaticResource TextDim}" TextWrapping="Wrap" Margin="0,8,0,0"
-                   Text="Send this to someone already in the share so they can add you — or paste theirs below to invite them. Both sides have to agree; that is Syncthing's design, not a missing feature here." />
+                   Text="Send this to someone already in the share so they can add you, or paste theirs below to invite them. Both sides have to agree; that is Syncthing's design, not a missing feature here." />
       </StackPanel>
     </Border>
 
@@ -69,7 +69,7 @@
         </Grid>
         <CheckBox x:Name="IntroducerCheck" Margin="0,10,0,0"
                   Foreground="{StaticResource Text}" FontSize="12"
-                  Content="This machine is the team's hub — introduce their other devices to me"
+                  Content="This machine is the team's hub, so introduce their other devices to me"
                   ToolTip="Tick this for the one or two machines that everyone pairs with. Syncthing will then learn about the rest of the team through them, so 30 people means 30 pairings instead of 435." />
         <TextBlock x:Name="IntroducerNote" Foreground="{StaticResource TextDim}" FontSize="11"
                    TextWrapping="Wrap" Margin="0,4,0,0" />

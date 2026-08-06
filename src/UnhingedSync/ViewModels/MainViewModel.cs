@@ -123,7 +123,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         foreach (var engine in EngineLocator.EnumerateInstalled())
         {
             var kind = Path.GetFileName(engine.InstallDir.TrimEnd(Path.DirectorySeparatorChar));
-            EngineOptions.Add(new EngineOption(engine.InstallDir, $"UE {engine.Version}  —  {kind}"));
+            EngineOptions.Add(new EngineOption(engine.InstallDir, $"UE {engine.Version}  ({kind})"));
         }
 
         // Assign the backing field directly: going through the setter here would persist
@@ -223,7 +223,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             var record = FindUsableRecord(WorkspaceCommit);
             if (record is null)
             {
-                BusyText = "No binaries yet — building…";
+                BusyText = "No binaries yet, building…";
                 record = await BuildPublishAndReloadAsync();
                 if (record is null) return;
             }
@@ -237,7 +237,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             await _installer.InstallAsync(record, _engine, zip, _log);
 
             await ReloadRowsAsync();
-            _log.Report("Ready — you can open the editor.");
+            _log.Report("Ready. You can open the editor.");
         });
     }
 
@@ -249,7 +249,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (otherMachine is not null)
         {
             _log.Report($"{otherMachine} is already building this commit. Waiting for them is usually faster " +
-                        "than building it again — press Refresh in a few minutes.");
+                        "than building it again. Press Refresh in a few minutes.");
             SetStatus(StatusKind.Warning,
                 $"{otherMachine} is building {WorkspaceCommit}",
                 "Press Refresh once they finish, then fetch the binaries.");
@@ -266,7 +266,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return null;
         }
 
-        _log.Report("No binaries published for this commit — building locally. This takes a while.");
+        _log.Report("No binaries published for this commit, so building locally. This takes a while.");
         var result = await _builder.BuildAndPublishAsync(_log);
 
         if (!result.Succeeded)
@@ -296,10 +296,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
             if (!Confirm(
                     $"These binaries are for {target}, but your workspace is on {WorkspaceCommit}.\n\n" +
                     $"Run \"dv update\" to {target} in Diversion first if you want matching code and " +
-                    "content. Installing anyway leaves the two mismatched — don't open the editor " +
+                    "content. Installing anyway leaves the two mismatched, so don't open the editor " +
                     "until you've synced, or a resave can silently drop data.\n\n" +
                     "Install anyway?",
-                    "Unhinged Sync — commit mismatch"))
+                    "Unhinged Sync: commit mismatch"))
                 return;
         }
 
@@ -340,10 +340,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 $"Compile {WorkspaceCommit} on this machine?\n\n" +
                 "This takes several minutes and replaces any downloaded binaries with your " +
                 "own build. The binaries are published for the team; the PDBs stay here.\n\n" +
-                "This is how you get symbols you can debug with — downloaded builds never " +
+                "This is how you get symbols you can debug with. Downloaded builds never " +
                 "come with usable PDBs, because a PDB only works with the exact DLL it was " +
                 "linked against.",
-                "Unhinged Sync — symbols"))
+                "Unhinged Sync: symbols"))
             return;
 
         await RunAsync("Building locally…", async () =>
@@ -384,7 +384,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         if (Status == StatusKind.Skew)
         {
             SetStatus(StatusKind.Skew, StatusHeadline,
-                "Fetch matching binaries before opening the editor — mismatched code can corrupt assets on save.");
+                "Fetch matching binaries before opening the editor. Mismatched code can corrupt assets on save.");
             return Task.CompletedTask;
         }
 
@@ -422,7 +422,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
             $"Engine: {EngineText}   Dir: {_engine.InstallDir}",
             $"Publish root: {_config.PublishRoot} (reachable: {_store.IsReachable})",
             $"PowerShell: {PowerShellLocator.Find() ?? "NOT FOUND"}",
-            $"Status: {StatusHeadline} — {StatusDetail}",
+            $"Status: {StatusHeadline}",
+            $"Detail: {StatusDetail}",
             "",
             "-- recent log --",
             LogText
@@ -435,7 +436,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
-            _log.Report("Could not reach the clipboard — try again.");
+            _log.Report("Could not reach the clipboard. Try again.");
         }
 
         return Task.CompletedTask;
@@ -492,23 +493,13 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        // Two folders, one of them empty, is otherwise indistinguishable from "nobody has
-        // published anything" -- and that misreading cost real time once already.
-        var syncthingPath = SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
-        if (!string.IsNullOrEmpty(syncthingPath) &&
-            !Path.TrimEndingDirectorySeparator(syncthingPath)
-                 .Equals(Path.TrimEndingDirectorySeparator(_config.PublishRoot), StringComparison.OrdinalIgnoreCase))
-        {
-            SetStatus(StatusKind.Warning, "This app and Syncthing disagree about where builds live",
-                $"Syncthing replicates {syncthingPath}, but this app is reading " +
-                $"{_config.PublishRoot}. Builds will look missing until they match. Fix the " +
-                "publishRoot in config.local.json, or re-point the folder in Syncthing.");
-            return;
-        }
-
         // The .uproject states which engine version the project targets. Building with a
         // different one is not a warning-and-carry-on situation: assets are versioned to
         // the engine that wrote them.
+        //
+        // Checked before the share-location warning below on purpose. Both are warnings, but
+        // only one of them can silently upgrade assets past the point of return, so it must
+        // not be possible for a misconfigured folder path to hide it.
         var association = EngineLocator.ReadEngineAssociation(_config.ProjectRoot, _config.ProjectFile);
         if (!string.IsNullOrEmpty(association) &&
             !_engine.Version.StartsWith(association, StringComparison.OrdinalIgnoreCase))
@@ -531,6 +522,23 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
+        // Two folders, one of them empty, is otherwise indistinguishable from "nobody has
+        // published anything", and that misreading cost real time once already. Both sides
+        // are normalised first because Syncthing stores the path as typed, including
+        // "~/..." and forward slashes, which would never compare equal raw.
+        var syncthingPath = SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
+        if (!string.IsNullOrEmpty(syncthingPath) &&
+            !Path.TrimEndingDirectorySeparator(ConfigLoader.NormalisePath(syncthingPath))
+                 .Equals(Path.TrimEndingDirectorySeparator(ConfigLoader.NormalisePath(_config.PublishRoot)),
+                         StringComparison.OrdinalIgnoreCase))
+        {
+            SetStatus(StatusKind.Warning, "This app and Syncthing disagree about where builds live",
+                $"Syncthing replicates {syncthingPath}, but this app is reading " +
+                $"{_config.PublishRoot}. Builds will look missing until they match. Set " +
+                "UNHINGEDSYNC_PUBLISH_ROOT, or re-point the folder in Syncthing.");
+            return;
+        }
+
         if (_installedCommit is null)
         {
             SetStatus(StatusKind.NeedsBinaries, "No binaries installed",
@@ -542,7 +550,7 @@ public sealed class MainViewModel : INotifyPropertyChanged
         {
             SetStatus(StatusKind.Skew,
                 $"Binaries are from {_installedCommit}, workspace is on {WorkspaceCommit}",
-                "Do not open the editor until these match — mismatched C++ and content can " +
+                "Do not open the editor until these match. Mismatched C++ and content can " +
                 "silently drop data when assets are resaved.");
             return;
         }

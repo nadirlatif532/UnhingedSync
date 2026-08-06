@@ -39,6 +39,23 @@ public static class UiTest
             }
         }
 
+        // Async work has to be awaited, not blocked on. This runs on the WPF dispatcher
+        // thread, so a .GetAwaiter().GetResult() here deadlocks the moment the awaited code
+        // tries to resume on that same thread.
+        async Task CheckAsync(string name, Func<Task> action)
+        {
+            try
+            {
+                await action();
+                results.Add(new { control = name, ok = true, error = (string?)null });
+            }
+            catch (Exception e)
+            {
+                failures++;
+                results.Add(new { control = name, ok = false, error = $"{e.GetType().Name}: {e.Message}" });
+            }
+        }
+
         // Applying a template requires a measure pass; Show() is not needed and would
         // put a window on someone's screen during a test.
         static void Realise(FrameworkElement element)
@@ -75,6 +92,23 @@ public static class UiTest
             {
                 var window = new ManageBinariesWindow(config);
                 Realise(window);
+            });
+
+            // The delete gate lives in an async Loaded handler, which Realise() does not
+            // run, so without driving it explicitly the single most consequential piece of
+            // logic in that window (may this machine delete other people's builds?) has no
+            // coverage at all. Awaited here so a throw inside it fails the test.
+            await CheckAsync("ManageBinariesWindow.sharePolicy", async () =>
+            {
+                var window = new ManageBinariesWindow(config);
+                Realise(window);
+                await window.ApplySharePolicyAsync();
+
+                // Whatever Syncthing said, deleting must never be enabled without a
+                // confirmed send-receive folder.
+                if (window.CanDelete && !window.PolicyConfirmedWritable)
+                    throw new InvalidOperationException(
+                        "Delete is enabled without a confirmed writable share.");
             });
         }
 

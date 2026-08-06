@@ -86,8 +86,12 @@ public static class PowerShellLocator
             }
             catch (OperationCanceledException)
             {
-                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
-                return false;
+                // Kill is best effort and genuinely may not work: an MSIX install is carried
+                // out by AppXSvc, not by a child of winget, so there is nothing in the tree
+                // to stop. Fall through to the Find() check below either way, because a slow
+                // install that did finish should not be reported as a failure.
+                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); }
+                catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
             }
         }
 

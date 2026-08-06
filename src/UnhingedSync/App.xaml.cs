@@ -149,7 +149,7 @@ public partial class App : Application
         }
 
         var prompt = MessageBox.Show(
-            "Unhinged Sync needs to know where your Unreal project is — the folder " +
+            "Unhinged Sync needs to know where your Unreal project is: the folder " +
             "containing the .uproject file.\n\n" +
             "You can add more projects later; each one opens in its own tab.\n\nPick one now?",
             "Add your first project",

@@ -1,6 +1,3 @@
-#Requires -Version 7.0
-# Windows PowerShell 5.1 cannot run this script: Set-Content has no utf8NoBOM there, and a
-# BOM on the first line of .stignore silently breaks Syncthing's first ignore rule.
 <#
 .SYNOPSIS
     Sets up Syncthing on this machine for the project's binaries share.
@@ -67,6 +64,11 @@
     ./Setup-Syncthing.ps1 -Role artist -PeerDeviceId ABCD123-... -PeerIsIntroducer
     ./Setup-Syncthing.ps1 -Role buildhost -PublishRoot D:\ProjectBinaries
 #>
+
+# Windows PowerShell 5.1 cannot run this script: Set-Content has no utf8NoBOM there, and a
+# BOM on the first line of .stignore silently breaks Syncthing's first ignore rule.
+# Must stay AFTER the help block above; anything before it stops Get-Help finding the help.
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]

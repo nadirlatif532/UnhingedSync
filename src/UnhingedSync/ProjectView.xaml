@@ -39,7 +39,7 @@
                     Background="{StaticResource PanelAlt}"
                     Foreground="{StaticResource Text}"
                     BorderBrush="{StaticResource Border}"
-                    ToolTip="Which installed Unreal Engine to build with. The version a project targets comes from its .uproject — this only chooses between installs on this machine." />
+                    ToolTip="Which installed Unreal Engine to build with. The version a project targets comes from its .uproject, so this only chooses between installs on this machine." />
         </StackPanel>
         <TextBlock Text="{Binding EngineText}" Style="{StaticResource Label}"
                    HorizontalAlignment="Right" Margin="0,5,0,0" />
@@ -103,23 +103,23 @@
         <Button Content="Sync &amp; Ensure Binaries"
                 Style="{StaticResource PrimaryButton}"
                 Command="{Binding SyncAndEnsureCommand}"
-                ToolTip="Pull the latest commit, then install matching binaries — building and publishing them here if nobody has yet." />
+                ToolTip="Pull the latest commit, then install matching binaries, building and publishing them here if nobody has yet." />
         <Button Content="Refresh" Command="{Binding RefreshCommand}" />
         <Button Content="Sharing…" Click="Sharing_Click"
-                ToolTip="Syncthing pairing: your device ID, invite a teammate, and accept requests — without leaving this app." />
+                ToolTip="Syncthing pairing: your device ID, invite a teammate, and accept requests, without leaving this app." />
         <Button Content="Manage Binaries…" Click="ManageBinaries_Click"
-                ToolTip="See every published build, delete individual ones, or keep only the newest few. This is the shared folder — deletions affect the whole team." />
+                ToolTip="See every published build, delete individual ones, or keep only the newest few. This is the shared folder, so deletions affect the whole team." />
         <Button Content="Fetch Selected" Command="{Binding FetchSelectedCommand}"
                 ToolTip="Install the binaries published for the selected commit." />
       </StackPanel>
 
       <StackPanel Grid.Column="2" Orientation="Horizontal">
         <Button Content="Build Locally" Command="{Binding BuildLocallyCommand}"
-                ToolTip="Compile this commit here instead of downloading it. Slower, but it leaves PDBs on your disk — the only way to get symbols you can debug with. PDBs are never published." />
+                ToolTip="Compile this commit here instead of downloading it. Slower, but it leaves PDBs on your disk, which is the only way to get symbols you can debug with. PDBs are never published." />
         <Button Content="Build Log" Command="{Binding OpenLogCommand}"
                 ToolTip="Open the published build log for the selected commit." />
         <Button Content="Copy Diagnostics" Command="{Binding CopyDiagnosticsCommand}"
-                ToolTip="Copies version, engine, project and recent log details to the clipboard — paste this when reporting a problem." />
+                ToolTip="Copies version, engine, project and recent log details to the clipboard. Paste this when reporting a problem." />
         <Button Content="Open Editor" Command="{Binding OpenEditorCommand}" Margin="0" />
       </StackPanel>
     </Grid>

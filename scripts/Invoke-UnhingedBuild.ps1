@@ -1,8 +1,3 @@
-#Requires -Version 7.0
-# Windows PowerShell 5.1 cannot run this script: Set-Content has no utf8NoBOM there, and
-# the JSON records written below must be BOM-free for the app's parser to read them. Left
-# to itself 5.1 fails partway through a build with a parameter-binding error that looks
-# like a project problem. This makes it refuse before running a single line instead.
 <#
 .SYNOPSIS
     Builds the project's editor binaries and publishes them for the team to fetch.
@@ -51,6 +46,16 @@
     ./Invoke-UnhingedBuild.ps1 -Publish
     ./Invoke-UnhingedBuild.ps1 -NoSync -DryRun
 #>
+
+# Windows PowerShell 5.1 cannot run this script: Set-Content has no utf8NoBOM there, and
+# the JSON records written below must be BOM-free for the app to parse them. Left to itself
+# 5.1 fails partway through a build with a parameter-binding error that looks like a project
+# problem. This makes it refuse before running a single line instead.
+#
+# Placement matters: this must come AFTER the help block above, not before it. PowerShell
+# stops recognising comment-based help for a script if anything, including #Requires,
+# precedes it, which silently turns Get-Help into bare auto-generated syntax.
+#Requires -Version 7.0
 [CmdletBinding()]
 param(
     [switch] $NoSync,

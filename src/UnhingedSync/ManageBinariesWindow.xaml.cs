@@ -115,7 +115,7 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
         _store = new BuildStore(config);
         _installer = new BinaryInstaller(config);
         _retainBuilds = Math.Max(1, config.RetainBuilds);
-        KeepLastButton.Content = $"Clean Up — Keep Newest {_retainBuilds}";
+        KeepLastButton.Content = $"Clean Up: Keep Newest {_retainBuilds}";
 
         Rows.ItemsSource = _rows;
         Load();
@@ -128,20 +128,31 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
     /// Until this resolves the delete controls stay disabled, so a fast click cannot beat
     /// the check.
     /// </summary>
-    private async Task ApplySharePolicyAsync()
+    /// <summary>
+    /// The resolved verdict, kept so a test can assert that CanDelete is never true without
+    /// a confirmed writable share.
+    /// </summary>
+    internal bool PolicyConfirmedWritable { get; private set; }
+
+    internal async Task ApplySharePolicyAsync()
     {
         var info = await ShareRole.ResolveAsync(_syncthing, _config.SyncthingFolderId);
+        PolicyConfirmedWritable = info.WritesReachTeam;
 
-        if (!info.IsKnown)
+        if (!info.SyncthingReachable || info.FolderType.Length == 0)
         {
             CanDelete = false;
             ScopeBanner.Background = Brush("#352C18");
             ScopeBanner.BorderBrush = Brush("#7A6229");
-            ScopeHeadline.Text = "Cannot tell what this machine is allowed to do";
-            ScopeDetail.Text =
-                "Syncthing is not reachable, so there is no way to know whether deleting here " +
-                "would reach the team or only this machine. Deleting is disabled until it is. " +
-                "Run the Syncthing setup from the Sharing window if it has never been set up.";
+            ScopeHeadline.Text = "Cannot confirm what this machine is allowed to do";
+            ScopeDetail.Text = info.SyncthingReachable
+                ? $"Syncthing is running but has no folder called '{_config.SyncthingFolderId}', so " +
+                  "there is nothing here it is replicating. Run the Syncthing setup from the Sharing " +
+                  "window."
+                : "Syncthing could not be reached, so there is no way to know whether deleting here " +
+                  "would free space for the team or only on this machine. Deleting stays disabled " +
+                  "until it can be confirmed, because guessing wrong deletes your only copy and " +
+                  "helps nobody. Start Syncthing, or run its setup from the Sharing window.";
         }
         else if (!info.WritesReachTeam)
         {
@@ -150,7 +161,7 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
             ScopeBanner.BorderBrush = Brush("#35597F");
             ScopeHeadline.Text = "This machine receives builds only, so deleting is disabled";
             ScopeDetail.Text =
-                $"The shared folder is set to {(string.IsNullOrEmpty(info.FolderType) ? "receive-only" : info.FolderType)} " +
+                $"The shared folder is set to {info.FolderType} " +
                 "here, which is how artist machines are set up. Syncthing does not send local " +
                 "deletions from a receive-only folder, so removing a build would free space on " +
                 "this machine alone, mark the folder permanently out of sync, and offer a Revert " +
@@ -217,7 +228,7 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
                 ? "No builds on disk yet."
                 : $"Cannot reach {_store.Root}."
             : $"{_rows.Count} build(s) on disk, {totalMb:0.#} MB total" +
-              (selected.Count > 0 ? $" — {selected.Count} selected, {selectedMb:0.#} MB" : "");
+              (selected.Count > 0 ? $". {selected.Count} selected, {selectedMb:0.#} MB" : "");
 
         DeleteButton.IsEnabled = CanDelete && selected.Count > 0;
         KeepLastButton.IsEnabled = CanDelete && _rows.Count > _retainBuilds;
@@ -254,13 +265,10 @@ public partial class ManageBinariesWindow : Window, INotifyPropertyChanged
 
         // Rows are newest-first by commit ordinal, the same ordering retention uses, so
         // "skip the first N" means the same thing in both places.
+        // The button is disabled when there is nothing to trim, so this is only a guard.
         var toDelete = _rows.Skip(_retainBuilds).ToList();
-        if (toDelete.Count == 0)
-        {
-            MessageBox.Show(this, $"Already at or under {_retainBuilds} builds, so there is nothing to clean up.",
-                "Nothing to do", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
+        if (toDelete.Count == 0) return;
+
         DeleteRows(toDelete, $"Keep the newest {_retainBuilds} and delete {toDelete.Count} older build(s)");
     }
 

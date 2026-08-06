@@ -56,7 +56,7 @@ public sealed class CommitRowViewModel
         BadgeKind.Syncing => "syncing…",
         BadgeKind.Expired => "expired",
         BadgeKind.Building => $"building on {ClaimedBy}",
-        _ => "—"
+        _ => "none"
     };
 
     public string Marker => (IsWorkspace, IsInstalled) switch

@@ -196,10 +196,16 @@ public static class UpdateChecker
 
         var error = await Task.Run(() => DownloadExtractAndSwap(zipUrl, currentExe));
 
+        // The download can outlive the window: someone can close the app during the
+        // half hour this is allowed to take. Continuing here would post to a dispatcher
+        // that has shut down and crash from a thread-pool thread, where the app's own
+        // exception handler cannot see it. The swap has already happened either way, so
+        // the new exe is in place and the next launch picks it up.
+        if (!AppAlive) return;
+
         if (error is not null)
         {
-            Tell(owner, $"The update could not be installed:\n\n{error}\n\n" +
-                        "Your existing copy is untouched.", MessageBoxImage.Error);
+            Tell(owner, $"The update could not be installed:\n\n{error}", MessageBoxImage.Error);
             return;
         }
 
@@ -211,6 +217,13 @@ public static class UpdateChecker
 
         Application.Current.Shutdown();
     }
+
+    /// <summary>
+    /// Whether there is still a live dispatcher to talk to. False once the last window has
+    /// closed, which can happen while a long download is in flight.
+    /// </summary>
+    private static bool AppAlive =>
+        Application.Current is { } app && !app.Dispatcher.HasShutdownStarted;
 
     /// <summary>Returns null on success, or a human-readable reason it failed.</summary>
     private static string? DownloadExtractAndSwap(string zipUrl, string currentExe)
@@ -228,7 +241,12 @@ public static class UpdateChecker
             // simply did nothing. Half an hour tolerates about 30 KB/s, while still meaning
             // a stalled connection eventually gives up instead of pinning a thread forever.
             using (var http = NewClient(TimeSpan.FromMinutes(30)))
-            using (var response = http.GetAsync(zipUrl).GetAwaiter().GetResult())
+            // ResponseHeadersRead so the body streams to disk. The default buffers the
+            // whole response before the call even returns, which for a ~55 MB asset means
+            // holding it all in memory on the large object heap first.
+            using (var response = http
+                       .GetAsync(zipUrl, HttpCompletionOption.ResponseHeadersRead)
+                       .GetAwaiter().GetResult())
             {
                 response.EnsureSuccessStatusCode();
                 using var source = response.Content.ReadAsStream();
@@ -261,11 +279,16 @@ public static class UpdateChecker
             // nothing moved into place, and the failure only noticed the next morning.
             if (renamed)
             {
-                try { File.Move(oldExe, currentExe); }
+                // overwrite: true matters. The move that failed was a cross-volume copy
+                // from %TEMP%, not an atomic rename, so it can leave a partial file at the
+                // destination -- and without overwrite the rollback would then fail too,
+                // leaving a corrupt exe in place and the only good copy named ".old".
+                try { File.Move(oldExe, currentExe, overwrite: true); }
                 catch (Exception rollback) when (rollback is IOException or UnauthorizedAccessException)
                 {
-                    return $"{e.Message}\n\nThe original could not be restored either. " +
-                           $"Rename this file back by hand:\n{oldExe}";
+                    return $"{e.Message}\n\nWorse, the original could not be put back. " +
+                           $"UnhingedSync.exe is now unusable. Delete it and rename this file " +
+                           $"back in its place:\n{oldExe}";
                 }
             }
             return e.Message;
@@ -289,14 +312,19 @@ public static class UpdateChecker
         return http;
     }
 
+    /// <summary>An owner window is only usable while it is actually loaded.</summary>
+    private static Window? UsableOwner(Window? owner) =>
+        owner is { IsLoaded: true } ? owner : null;
+
     private static void Tell(Window? owner, string message, MessageBoxImage icon)
     {
-        if (owner is not null) MessageBox.Show(owner, message, "Unhinged Sync", MessageBoxButton.OK, icon);
+        if (!AppAlive) return;
+        if (UsableOwner(owner) is { } w) MessageBox.Show(w, message, "Unhinged Sync", MessageBoxButton.OK, icon);
         else MessageBox.Show(message, "Unhinged Sync", MessageBoxButton.OK, icon);
     }
 
     private static MessageBoxResult Ask(Window? owner, string message) =>
-        owner is not null
-            ? MessageBox.Show(owner, message, "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information)
+        UsableOwner(owner) is { } w
+            ? MessageBox.Show(w, message, "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information)
             : MessageBox.Show(message, "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information);
 }
