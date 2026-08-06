@@ -209,19 +209,27 @@ in the Epic launcher.
 **If a teammate sees behaviour you don't, compare the app version** shown in the top right
 first. Mismatched copies of the tool are the single most likely explanation.
 
-## Packaging a new version
+## Releasing a new version
+
+1. Bump `<Version>` in `UnhingedSync.csproj`. It shows in the app's top-right corner, keys
+   the extracted script cache, and is what the update checker compares against — a
+   teammate running an old copy is visible rather than mysterious.
+2. Commit, then tag and push: `git tag v1.1.0 && git push origin v1.1.0`.
+3. `.github/workflows/release.yml` builds the self-contained exe, zips it, and publishes a
+   GitHub Release with that tag. Nothing to run locally.
+
+Every teammate's app polls the repo's *latest release* on launch (at most once every 4
+hours) and, if it's newer, offers a one-click update: download, swap the exe, relaunch.
+The repo is public specifically so this needs no token — the update check would otherwise
+require distributing and rotating a GitHub PAT to everyone on the team just to read release
+metadata.
+
+To build a zip by hand instead — for local testing, or before you have a tag pushed:
 
 ```bash
 dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
 Compress-Archive -Path dist/UnhingedSync.exe -DestinationPath UnhingedSync.zip -Force
 ```
-
-That's the whole thing. `dist/UnhingedSync.exe` is self-contained — the .NET runtime and
-every script are inside it — so the zip is one file and there is nothing to keep together.
-
-Bump `<Version>` in `UnhingedSync.csproj` when you release. It shows in the app's top-right
-corner and keys the extracted script cache, so a teammate running an old copy is visible
-rather than mysterious.
 
 There used to be a wrapper script here. It resolved an output folder from per-machine
 config, staged to temp, and deleted a 67 KB `.pdb` — ceremony around one `dotnet publish`,

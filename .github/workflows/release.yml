@@ -1,0 +1,35 @@
+name: Release
+
+# Push a tag like v1.1.0 to cut a release. The app's own update checker polls
+# GitHub's "latest release" endpoint, so whatever lands here is what every
+# teammate gets offered next time they open the tool.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish self-contained exe
+        run: dotnet publish src/UnhingedSync/UnhingedSync.csproj -c Release -o dist
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/UnhingedSync.exe -DestinationPath UnhingedSync.zip -Force
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: UnhingedSync.zip
+          generate_release_notes: true

@@ -126,6 +126,24 @@ public static class ConfigLoader
         return "";
     }
 
+    /// <summary>When the update checker last asked GitHub, so it doesn't ask every launch.</summary>
+    public static DateTimeOffset? GetLastUpdateCheckUtc() =>
+        ReadLocalJson()?["lastUpdateCheckUtc"]?.GetValue<string>() is { Length: > 0 } s &&
+        DateTimeOffset.TryParse(s, out var t) ? t : null;
+
+    public static void SetLastUpdateCheckUtc(DateTimeOffset value) =>
+        SaveLocalSetting("lastUpdateCheckUtc", value.ToString("o"));
+
+    /// <summary>
+    /// A release the user chose "later" for, so the popup doesn't nag again about the
+    /// same version -- it'll ask again once a newer one ships.
+    /// </summary>
+    public static string GetDismissedUpdateVersion() =>
+        ReadLocalJson()?["dismissedUpdateVersion"]?.GetValue<string>() ?? "";
+
+    public static void SetDismissedUpdateVersion(string version) =>
+        SaveLocalSetting("dismissedUpdateVersion", version);
+
     /// <summary>Pass an empty engineDir to go back to resolving from the .uproject.</summary>
     public static void SetEngineOverride(string projectRoot, string engineDir)
     {

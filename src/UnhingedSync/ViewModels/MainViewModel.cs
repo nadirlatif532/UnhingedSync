@@ -288,12 +288,25 @@ public sealed class MainViewModel : INotifyPropertyChanged
         var row = SelectedRow;
         if (row?.Record is null) return;
 
+        if (row.Commit.CommitId != WorkspaceCommit)
+        {
+            var target = row.Commit.Ordinal > 0 ? $"#{row.Commit.Ordinal}" : row.Commit.CommitId;
+            if (!Confirm(
+                    $"These binaries are for {target}, but your workspace is on {WorkspaceCommit}.\n\n" +
+                    $"Run \"dv update\" to {target} in Diversion first if you want matching code and " +
+                    "content. Installing anyway leaves the two mismatched — don't open the editor " +
+                    "until you've synced, or a resave can silently drop data.\n\n" +
+                    "Install anyway?",
+                    "Unhinged Sync — commit mismatch"))
+                return;
+        }
+
         await RunAsync("Installing binaries…", async () =>
         {
             if (row.Commit.CommitId != WorkspaceCommit)
             {
-                _log.Report($"WARNING: installing binaries for {row.Commit.CommitId} while your workspace " +
-                            $"is on {WorkspaceCommit}. Content and code will not match.");
+                _log.Report($"WARNING: installed binaries for {row.Commit.CommitId} while your workspace " +
+                            $"is on {WorkspaceCommit}. Sync in Diversion before opening the editor.");
             }
 
             var zip = _store.ZipPathFor(row.Record)
@@ -327,7 +340,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
                 "own build. The binaries are published for the team; the PDBs stay here.\n\n" +
                 "This is how you get symbols you can debug with — downloaded builds never " +
                 "come with usable PDBs, because a PDB only works with the exact DLL it was " +
-                "linked against."))
+                "linked against.",
+                "Unhinged Sync — symbols"))
             return;
 
         await RunAsync("Building locally…", async () =>
@@ -360,9 +374,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
         });
     }
 
-    private static bool Confirm(string message) =>
-        MessageBox.Show(message, "Unhinged Sync — symbols",
-            MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
+    private static bool Confirm(string message, string title) =>
+        MessageBox.Show(message, title, MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
 
     private Task OpenEditorAsync()
     {

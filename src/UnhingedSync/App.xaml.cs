@@ -52,9 +52,14 @@ public partial class App : Application
 
         try
         {
+            UpdateChecker.CleanUpAfterRelaunch();
             if (!EnsureAtLeastOneProject()) { Shutdown(1); return; }
             if (!EnsurePublishRoot()) { Shutdown(1); return; }
             new MainWindow().Show();
+
+            // Fire-and-forget: a GitHub round trip should never delay the window
+            // appearing, and a failed check should never be louder than a missed one.
+            _ = UpdateChecker.CheckAsync();
         }
         catch (Exception ex)
         {
