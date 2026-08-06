@@ -36,5 +36,8 @@
     <EmbeddedResource Include="..\..\scripts\Setup-Syncthing.bat" LogicalName="scripts/Setup-Syncthing.bat" />
     <EmbeddedResource Include="..\..\scripts\Reset-Ftue.ps1" LogicalName="scripts/Reset-Ftue.ps1" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="AWSSDK.S3" Version="4.0.101.7" />
+  </ItemGroup>
 
 </Project>

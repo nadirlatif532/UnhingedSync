@@ -14,6 +14,14 @@ dist/
 App/
 *.zip
 
+# Credentials must never reach this repository, which is public. A project's
+# unhingedsync.json carries the bucket access keys and belongs only in that project's
+# own private version control. Ignored here so a stray copy cannot be committed by
+# accident.
+**/unhingedsync.json
+*.r2.json
+.env
+
 # OS
 Thumbs.db
 .DS_Store

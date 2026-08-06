@@ -20,8 +20,14 @@ public sealed class AppConfig
     public EngineConfig Engine { get; set; } = new();
 
     /// <summary>
-    /// Syncthing folder ID for the share. Must match on every machine; the setup
-    /// script uses the same default.
+    /// Where published builds live. Committed with the project, which is private, so a
+    /// teammate who syncs the project is configured with no further setup.
+    /// </summary>
+    public StorageConfig Storage { get; set; } = new();
+
+    /// <summary>
+    /// Syncthing folder ID, kept only so an older project config still deserialises
+    /// without error while the team moves to object storage. Nothing reads it.
     /// </summary>
     public string SyncthingFolderId { get; set; } = "";
 
@@ -34,6 +40,62 @@ public sealed class AppConfig
     /// belongs in the committed config.
     /// </summary>
     [JsonIgnore] public string EngineDirOverride { get; set; } = "";
+}
+
+/// <summary>
+/// Credentials and location for the object store holding published builds.
+///
+/// Both keys live here, in the project's own committed config, which is deliberate: the
+/// project repository is private, and one file that just works beats a per-machine setup
+/// step twenty five people have to get right. The consequence, stated plainly because it
+/// is a real trade: anyone who can open the project can publish and delete builds. The
+/// storage layer enforces nothing; the confirmations in the UI are guard rails against
+/// mistakes, not against people.
+///
+/// This must never appear in the Unhinged Sync repository itself, which is public. See
+/// CredentialGuard.
+/// </summary>
+public sealed class StorageConfig
+{
+    /// <summary>r2, or any S3-compatible service via <see cref="EndpointUrl"/>.</summary>
+    public string Provider { get; set; } = "r2";
+
+    /// <summary>Cloudflare account ID, used to derive the R2 endpoint.</summary>
+    public string AccountId { get; set; } = "";
+
+    public string Bucket { get; set; } = "";
+    public string AccessKeyId { get; set; } = "";
+    public string SecretAccessKey { get; set; } = "";
+
+    /// <summary>Set for a non-R2 S3 service. Otherwise derived from the account ID.</summary>
+    public string EndpointUrl { get; set; } = "";
+
+    /// <summary>Optional key prefix, so one bucket can hold several projects.</summary>
+    public string Prefix { get; set; } = "";
+
+    [JsonIgnore]
+    public string ResolvedEndpoint => !string.IsNullOrWhiteSpace(EndpointUrl)
+        ? EndpointUrl
+        : $"https://{AccountId}.r2.cloudflarestorage.com";
+
+    [JsonIgnore]
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(Bucket) &&
+        !string.IsNullOrWhiteSpace(AccessKeyId) &&
+        !string.IsNullOrWhiteSpace(SecretAccessKey) &&
+        (!string.IsNullOrWhiteSpace(AccountId) || !string.IsNullOrWhiteSpace(EndpointUrl));
+
+    /// <summary>What is missing, for a message worth reading.</summary>
+    public string DescribeWhatIsMissing()
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(Bucket)) missing.Add("bucket");
+        if (string.IsNullOrWhiteSpace(AccessKeyId)) missing.Add("accessKeyId");
+        if (string.IsNullOrWhiteSpace(SecretAccessKey)) missing.Add("secretAccessKey");
+        if (string.IsNullOrWhiteSpace(AccountId) && string.IsNullOrWhiteSpace(EndpointUrl))
+            missing.Add("accountId or endpointUrl");
+        return missing.Count == 0 ? "" : string.Join(", ", missing);
+    }
 }
 
 public sealed class EngineConfig

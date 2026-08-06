@@ -33,6 +33,18 @@ public partial class App : Application
             return;
         }
 
+        // Checks the bucket and token before anyone relies on them. Every way this can be
+        // misconfigured otherwise surfaces as the same "no builds found".
+        if (e.Args.Any(a => a.Equals("--storagetest", StringComparison.OrdinalIgnoreCase)))
+        {
+            var storagePath = e.Args.SkipWhile(a => !a.Equals("--storagetest", StringComparison.OrdinalIgnoreCase))
+                                    .Skip(1)
+                                    .FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal));
+            var includeWrite = e.Args.Any(a => a.Equals("--write", StringComparison.OrdinalIgnoreCase));
+            Shutdown(await StorageTest.RunAsync(storagePath, includeWrite));
+            return;
+        }
+
         if (e.Args.Any(a => a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase)))
         {
             var path = e.Args.SkipWhile(a => !a.Equals("--syncthing", StringComparison.OrdinalIgnoreCase))
