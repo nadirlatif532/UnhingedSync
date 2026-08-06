@@ -14,6 +14,27 @@ public sealed class CommitRowViewModel
     public string? ClaimedBy { get; init; }
 
     public string CommitLabel => Commit.Ordinal > 0 ? $"#{Commit.Ordinal}" : Commit.CommitId;
+
+    // Sort keys, because the displayed values sort wrongly. "#9" beats "#52"
+    // alphabetically, "Aug 5" beats "Jul 30", and "9.4 MB" beats "27.7 MB". The grid
+    // columns point at these instead of at the text the user reads.
+    public int OrdinalSort => Commit.Ordinal;
+    public DateTimeOffset WhenSort => Commit.Date ?? DateTimeOffset.MinValue;
+    public long SizeSort => Record?.ZipBytes ?? 0;
+
+    /// <summary>
+    /// Ranks the badge so sorting by state groups usefully: ready first, then in progress,
+    /// then problems, then nothing. Sorting by the glyph would order by character code.
+    /// </summary>
+    public int StateSort => Badge switch
+    {
+        BadgeKind.Available => 0,
+        BadgeKind.Building => 1,
+        BadgeKind.Syncing => 2,
+        BadgeKind.Failed => 3,
+        BadgeKind.Expired => 4,
+        _ => 5
+    };
     public string Author => ShortenEmail(Commit.AuthorEmail);
     public string When => Commit.Date is { } d ? d.ToLocalTime().ToString("MMM d, HH:mm") : "";
     public string Message => Commit.Message;

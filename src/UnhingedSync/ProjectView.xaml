@@ -3,12 +3,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="{StaticResource Bg}">
 
-  <Grid Margin="16">
+  <!-- Scrolls when the window is shorter than the content. Without this, shrinking the
+       window squeezed the commit list to nothing while the log kept its fixed height. -->
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <Grid Margin="16" MinHeight="620">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
+      <RowDefinition Height="*" MinHeight="200" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="180" />
     </Grid.RowDefinitions>
@@ -173,7 +176,9 @@
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
 
-          <DataGridTemplateColumn Header="" Width="34">
+          <!-- SortMemberPath everywhere the displayed text sorts differently from its
+               meaning: "#9" beats "#52" alphabetically and "Aug" beats "Jul". -->
+          <DataGridTemplateColumn Header="" Width="34" SortMemberPath="StateSort">
             <DataGridTemplateColumn.CellTemplate>
               <DataTemplate>
                 <TextBlock Text="{Binding BadgeGlyph}" FontSize="14" VerticalAlignment="Center"
@@ -183,10 +188,13 @@
             </DataGridTemplateColumn.CellTemplate>
           </DataGridTemplateColumn>
 
-          <DataGridTextColumn Header="COMMIT" Binding="{Binding CommitLabel}" Width="80" />
-          <DataGridTextColumn Header="BINARIES" Binding="{Binding BinariesText}" Width="140" />
+          <DataGridTextColumn Header="COMMIT" Binding="{Binding CommitLabel}" Width="80"
+                              SortMemberPath="OrdinalSort" SortDirection="Descending" />
+          <DataGridTextColumn Header="BINARIES" Binding="{Binding BinariesText}" Width="140"
+                              SortMemberPath="SizeSort" />
           <DataGridTextColumn Header="AUTHOR" Binding="{Binding Author}" Width="130" />
-          <DataGridTextColumn Header="WHEN" Binding="{Binding When}" Width="120" />
+          <DataGridTextColumn Header="WHEN" Binding="{Binding When}" Width="120"
+                              SortMemberPath="WhenSort" />
           <DataGridTextColumn Header="MESSAGE" Binding="{Binding Message}" Width="*" />
         </DataGrid.Columns>
       </DataGrid>
@@ -222,4 +230,5 @@
                TextChanged="LogBox_TextChanged" />
     </Border>
   </Grid>
+  </ScrollViewer>
 </UserControl>

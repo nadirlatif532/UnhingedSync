@@ -1,17 +1,23 @@
 <Window x:Class="UnhingedSync.PeersWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sharing &amp; Peers" Height="640" Width="760"
-        MinHeight="520" MinWidth="620"
+        Title="Sharing &amp; Peers" Height="700" Width="780"
+        MinHeight="320" MinWidth="480"
         Background="{StaticResource Bg}"
         WindowStartupLocation="CenterOwner">
 
-  <Grid Margin="16">
+  <!-- The whole page scrolls. This window has a lot of stacked panels and shrinking it
+       used to clip the peer list and the footer off the bottom with no way to reach them.
+       MinHeight on the inner grid is what gives the scrollbar something to scroll. -->
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <Grid Margin="16" MinHeight="560">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
+      <!-- Auto, not star: the peer list grows with the team and the page scroller takes
+           care of it. Star would clip it at whatever the window happened to be. -->
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
@@ -64,6 +70,23 @@
         <TextBlock Foreground="{StaticResource TextDim}" FontSize="11" TextWrapping="Wrap"
                    Margin="0,4,0,0"
                    Text="Use your own name here. It is what everyone else sees in their peer list, and a list of computer names tells nobody who is who." />
+
+        <!-- An action, not a state toggle. This was a checkbox called "this machine acts as
+             the team's hub", which was close to theatre: Syncthing has no such flag, so
+             ticking it only wrote a note that nothing else ever read. The button underneath
+             it was the only part that did anything, so that is all that is left. -->
+        <Border Background="{StaticResource PanelAlt}" CornerRadius="5" Padding="10,8"
+                Margin="0,12,0,0">
+          <StackPanel>
+            <Button x:Name="ShareAllButton" Content="Offer the folder to every peer"
+                    HorizontalAlignment="Left" Click="ShareAll_Click"
+                    ToolTip="Makes sure every peer you know is actually being sent builds. Devices introduced by a hub are added automatically but are NOT offered the folder, so without this they appear paired and receive nothing." />
+            <TextBlock x:Name="ActAsHubNote" Foreground="{StaticResource TextDim}" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,6,0,0" />
+            <TextBlock x:Name="HubSummary" Foreground="{StaticResource TextDim}" FontSize="11"
+                       TextWrapping="Wrap" Margin="0,6,0,0" />
+          </StackPanel>
+        </Border>
       </StackPanel>
     </Border>
 
@@ -96,33 +119,25 @@
                    BorderThickness="1" Foreground="{StaticResource Text}" FontSize="12"
                    ToolTip="Who this is, so your peer list is readable. Leave blank and their own name is used if they have set one." />
         </Grid>
+        <!-- Says "they", not "this machine". It used to read "This machine is the team's
+             hub" while actually describing the peer being added, directly above a second
+             checkbox that really was about this machine. Two boxes opening with the same
+             three words and meaning opposite things is what confused people onboarding. -->
         <CheckBox x:Name="IntroducerCheck" Margin="0,10,0,0"
                   Foreground="{StaticResource Text}" FontSize="12"
-                  Content="This machine is the team's hub, so introduce their other devices to me"
-                  ToolTip="Tick this for the one or two machines that everyone pairs with. Syncthing will then learn about the rest of the team through them, so 30 people means 30 pairings instead of 435." />
+                  Content="They are our hub, so introduce me to the rest of the team"
+                  ToolTip="Tick this when the ID you pasted belongs to the one machine everyone pairs with. Syncthing then learns about the rest of the team through them, so 30 people means 30 pairings instead of 435." />
         <TextBlock x:Name="IntroducerNote" Foreground="{StaticResource TextDim}" FontSize="11"
                    TextWrapping="Wrap" Margin="0,4,0,0" />
-
-        <Border Background="{StaticResource PanelAlt}" CornerRadius="5" Padding="10,8"
-                Margin="0,12,0,0">
-          <StackPanel>
-            <CheckBox x:Name="ActAsHubCheck" Click="ActAsHub_Click"
-                      Foreground="{StaticResource Text}" FontSize="12"
-                      Content="This machine acts as the team's hub"
-                      ToolTip="Records that you are the machine everyone pairs with, and offers to make sure every peer you know is being sent builds." />
-            <TextBlock x:Name="ActAsHubNote" Foreground="{StaticResource TextDim}" FontSize="11"
-                       TextWrapping="Wrap" Margin="0,4,0,0" />
-            <TextBlock x:Name="HubSummary" Foreground="{StaticResource TextDim}" FontSize="11"
-                       TextWrapping="Wrap" Margin="0,6,0,0" />
-          </StackPanel>
-        </Border>
       </StackPanel>
     </Border>
 
     <!-- ── pending + peers ────────────────────────────────────── -->
     <Border Grid.Row="3" Margin="0,14,0,0" CornerRadius="6"
             Background="{StaticResource Panel}" BorderBrush="{StaticResource Border}" BorderThickness="1">
-      <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="14,12">
+      <!-- Scrolling is the page's job, not this panel's: two nested scrollers means the
+           mouse wheel gets swallowed by whichever one happens to be under the pointer. -->
+      <ScrollViewer VerticalScrollBarVisibility="Disabled" Padding="14,12">
         <StackPanel>
           <TextBlock Text="WAITING FOR YOU" Style="{StaticResource Label}" />
           <ItemsControl x:Name="PendingList" Margin="0,6,0,0">
@@ -204,4 +219,5 @@
       </StackPanel>
     </Grid>
   </Grid>
+  </ScrollViewer>
 </Window>

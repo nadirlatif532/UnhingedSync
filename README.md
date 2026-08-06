@@ -74,8 +74,8 @@ That machine should be a programmer's machine or a dedicated build box.
 1. Do the seven steps above.
 2. Open **Sharing...** and run the Syncthing setup, choosing **Programmer** or
    **Dedicated build machine**.
-3. Tick **This machine acts as the team's hub**, and accept the offer to send the folder to
-   every peer you know.
+3. Press **Offer the folder to every peer** whenever somebody new joins. There is nothing to
+   switch on to "become" the hub, and the reason is explained below.
 4. Press **Sync & Ensure Binaries**. Since nothing is published yet, this compiles and
    publishes the first build.
 5. Commit `Tools/unhingedsync.json` to Diversion. This is important: it is how the whole
@@ -107,16 +107,18 @@ a **Make hub** or **Not a hub** button. Only a programmer or build host can use 
 because promoting a peer means auto-accepting the devices it introduces and letting it
 create folders on your disk.
 
-A programmer can also tick **This machine acts as the team's hub**. Worth knowing exactly
-what that does, because the wording promises more than Syncthing can deliver: there is no
-"I am a hub" flag anywhere in Syncthing. The introducer bit lives on every *other* machine,
-so you become the hub only when teammates tick the box against your device ID. Declaring it
-on your own machine cannot make that happen.
+**There is nothing to switch on to become the hub, and that is not an omission.** Syncthing
+has no "I am a hub" flag. The introducer bit lives on every *other* machine, so you become
+the hub the moment teammates tick *"they are our hub"* against your device ID. Nothing you
+can set locally affects that, so the app does not pretend otherwise.
 
-What it does do is record the intention, and offer the one step that genuinely is the hub
-owner's job: making sure every peer you know is actually being offered the binaries folder.
-Skip that and introductions spread contacts around the team without spreading any builds,
-which looks like everything is paired correctly while nobody receives anything.
+There is one duty that genuinely is the hub owner's, and it has a button: **Offer the folder
+to every peer**. A device introduced by a hub is added to your device list *without* being
+offered any folder, so it looks correctly paired and receives nothing at all. Press this
+whenever somebody new joins.
+
+Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
+joiners have nobody to pair with until someone else is promoted.
 
 Two hubs are better than one. If the only hub is reinstalled or leaves the company, new
 joiners have nobody to pair with until someone else is promoted.
@@ -265,8 +267,8 @@ JSON report. Exit code 0 means everything passed.
 | Symptom | Likely cause |
 |---|---|
 | "Binary share not reachable" | Syncthing is not running, or the folder path does not exist. |
-| "This app and Syncthing disagree about where builds live" | Two different folders are in play. Re-point the folder in Syncthing, or set `UNHINGEDSYNC_PUBLISH_ROOT`. Editing `config.local.json` will not help here, because Syncthing's own folder path deliberately wins over the saved value. |
-| The build list is empty but teammates see builds | Usually the same path disagreement, or Syncthing has not finished the first sync. |
+| The build list is empty but the folder has builds in it | Press **Refresh**. The app follows Syncthing's folder path, and adopting it happens on refresh. The log says which folder it settled on. |
+| The build list is empty but teammates see builds | Syncthing has probably not finished the first sync. Check the percentage in **Sharing...**, and that a peer is actually offering you the folder. |
 | "Syncthing is running but will not let this app in" | Syncthing's live settings have diverged from its `config.xml`, so the API key the app read is rejected. Open the Syncthing UI, copy the key from Actions then Settings, and add it to `config.local.json` as `"syncthingApiKey"`. Restarting Syncthing often fixes it outright. |
 | "Cannot confirm what this machine is allowed to do" in Manage Binaries | Deleting stays disabled until Syncthing can confirm the folder is send-receive, because deleting on a receive-only share destroys your only copy and frees nothing for anyone. Start Syncthing and press Refresh. |
 | A red badge | Open **Build Log** for the actual compiler output. |
@@ -350,27 +352,49 @@ Unreal **bans** some shipped MSVC versions outright. See `BannedVisualCppVersion
 
 `%LOCALAPPDATA%\UnhingedSync\config.local.json` holds the publish root, the known project
 list, this machine's role, the per project engine choice, update check bookkeeping, and an
-optional `syncthingApiKey`, and whether this machine acts as the hub.
+optional `syncthingApiKey`.
 
 Your display name and which peers are hubs are **not** stored here. Those live in
 Syncthing's own configuration, because Syncthing is what acts on them.
 
-Environment overrides, useful for scripting: `UNHINGEDSYNC_PROJECT_ROOT` and
-`UNHINGEDSYNC_PUBLISH_ROOT`.
+## Where the shared folder lives
 
-Where the shared folder lives is resolved in this order, and the order matters:
+**Paths do not have to match between teammates, and there is nothing to coordinate.** Only
+`syncthingFolderId` has to be byte-identical across the team. Syncthing folder paths are
+per-machine, so one person can keep the share on `D:\Builds` and another under their user
+profile, and they sync perfectly.
 
-1. `UNHINGEDSYNC_PUBLISH_ROOT`, which is the way to override deliberately.
-2. Syncthing's own path for the project's folder ID, read from its config.
+Two things could disagree about the path: Syncthing, which is actually moving the bytes, and
+this app, which reads the folder. **Syncthing always wins.** The app checks the running
+daemon on every refresh and follows it, logging one line. If the app read anywhere else it
+would simply be wrong, and the symptom is nasty precisely because it looks benign: an empty
+build list, indistinguishable from nobody having published anything.
+
+That covers the case that actually bit us. A teammate accepted the folder offer in
+Syncthing's own web UI and chose their own path, and the app, which had resolved a default at
+startup, never noticed. It now re-checks and follows.
+
+On a machine with nothing configured, the folder goes to `%USERPROFILE%\UnhingedShare`. It is
+always writable, it is never inside the Diversion workspace where `dv clean` would delete it,
+and because paths need not match, per-user is no downside.
+
+If you want it elsewhere, **move the folder in Syncthing** and the app will follow on the
+next refresh. That is the supported way, and it is one place rather than two.
+
+There is also an `UNHINGEDSYNC_PUBLISH_ROOT` environment variable, which overrides everything
+including Syncthing. It exists for scripting and CI. Do not hand it to a teammate as a fix
+for anything: moving the folder in Syncthing is easier and cannot drift.
+
+Full resolution order, for reference:
+
+1. `UNHINGEDSYNC_PUBLISH_ROOT`, if set.
+2. Syncthing's path for the project's folder ID, from the running daemon, falling back to its
+   config file.
 3. The value saved in `config.local.json`.
-4. The folder the executable is sitting in, if it looks like a share.
+4. The folder the executable sits in, if it looks like a share.
 5. `%USERPROFILE%\UnhingedShare`.
 
-Syncthing outranks the saved value on purpose. The saved value is not necessarily a choice
-anyone made, because the app writes back whatever it resolved on every startup. Checking it
-first meant a machine that once fell through to the default kept reading an empty folder
-while Syncthing replicated somewhere else, and the only symptom was a build list that stayed
-empty.
+Steps 3 to 5 only decide the first run. From then on, Syncthing is the answer.
 
 ### The engine selector
 

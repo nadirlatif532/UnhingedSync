@@ -158,21 +158,6 @@ public static class ConfigLoader
     public static string GetSyncthingApiKey() =>
         ReadLocalJson()?["syncthingApiKey"]?.GetValue<string>() ?? "";
 
-    /// <summary>
-    /// Whether this machine considers itself the team's hub. A local declaration only:
-    /// Syncthing has no such flag, because the introducer bit that makes someone a hub is
-    /// set on every other machine, not on the hub itself.
-    /// </summary>
-    public static bool GetActAsHub() =>
-        ReadLocalJson()?["actAsHub"]?.GetValue<bool>() ?? false;
-
-    public static void SetActAsHub(bool value)
-    {
-        var root = ReadLocalJson() ?? new JsonObject();
-        root["actAsHub"] = value;
-        WriteLocalJson(root);
-    }
-
     /// <summary>Whether this machine already said "no" to auto-installing PowerShell 7.</summary>
     public static bool GetDeclinedPowerShellInstall() =>
         ReadLocalJson()?["declinedPowerShellInstall"]?.GetValue<bool>() ?? false;
@@ -404,6 +389,30 @@ public static class ConfigLoader
         {
             return expanded;
         }
+    }
+
+    /// <summary>
+    /// Decides whether Syncthing's folder path is somewhere different from where we are
+    /// reading, returning the path to adopt or null to stay put.
+    ///
+    /// Separated out because it is the whole decision, and getting it wrong is invisible:
+    /// too eager and the app rewrites its config on every refresh, too shy and it keeps
+    /// reading an empty folder. The comparison has to survive trailing separators, case,
+    /// forward slashes and "~", all of which Syncthing stores verbatim.
+    /// </summary>
+    public static string? ResolveAdoption(string? livePath, string currentPath)
+    {
+        if (string.IsNullOrWhiteSpace(livePath)) return null;
+
+        var live = NormalisePath(livePath);
+        if (string.IsNullOrWhiteSpace(live)) return null;
+
+        var current = NormalisePath(currentPath ?? "");
+
+        return Path.TrimEndingDirectorySeparator(live)
+                   .Equals(Path.TrimEndingDirectorySeparator(current), StringComparison.OrdinalIgnoreCase)
+            ? null
+            : live;
     }
 
     private static LocalOverrides? ReadLocalOverrides()

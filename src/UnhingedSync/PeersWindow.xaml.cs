@@ -53,6 +53,7 @@ public partial class PeersWindow : Window
         // a name nobody can save is worse than an empty one.
         SaveNameButton.IsEnabled = running;
         MyNameBox.IsEnabled = running;
+        ShareAllButton.IsEnabled = running;
 
         if (!running)
         {
@@ -71,7 +72,7 @@ public partial class PeersWindow : Window
             NoPeers.Visibility = Visibility.Collapsed;
             FolderStatus.Text = "";
             HubSummary.Text = "";
-            ActAsHubCheck.IsEnabled = false;
+            ShareAllButton.IsEnabled = false;
             return;
         }
 
@@ -283,16 +284,10 @@ public partial class PeersWindow : Window
                     "Run the setup first if you need to mark a hub as introducer."
             };
 
-        // Acting as the hub is a publishing machine's job. An artist's laptop being the one
-        // everyone pairs with would mean the share depends on a machine that cannot build,
-        // and the checkbox also hands out folder-creation trust.
-        ActAsHubCheck.IsEnabled = mayIntroduce;
-        ActAsHubCheck.IsChecked = mayIntroduce && ConfigLoader.GetActAsHub();
-        ActAsHubNote.Text = mayIntroduce
-            ? "Syncthing has no flag for this. Teammates make you their hub by ticking the box " +
-              "above against your device ID, so ticking here records the intention and keeps " +
-              "every peer you know supplied with builds."
-            : "Only a programmer or build host can act as the hub.";
+        ActAsHubNote.Text =
+            "You become the team's hub when teammates tick \"they are our hub\" against your " +
+            "device ID. There is nothing to switch on here. Use this after anyone joins, " +
+            "because a device a hub introduces is paired without being offered the folder.";
 
         RoleBadge.Text = string.IsNullOrEmpty(role) ? "role: unknown" : $"role: {role}";
     }
@@ -399,53 +394,37 @@ public partial class PeersWindow : Window
     }
 
     /// <summary>
-    /// Records that this machine is willing to act as the team's hub.
+    /// Offers the binaries folder to every peer not already receiving it.
     ///
-    /// Worth being precise, because the name suggests more than Syncthing can offer: there
-    /// is no "I am a hub" flag. The introducer flag lives on everyone ELSE's machine, so a
-    /// machine becomes the hub only when other people tick "this machine is the team's hub"
-    /// against it. Declaring it here cannot make that happen.
+    /// This is the one mechanical duty a hub owner actually has. Syncthing has no "I am a
+    /// hub" flag to set: the introducer bit lives on everyone else's machine, so you become
+    /// the hub only when teammates tick the box against your device ID. What does NOT happen
+    /// automatically is folder sharing. A device introduced by a hub is added to the device
+    /// list without being offered any folder, so it looks correctly paired and receives
+    /// nothing at all until someone runs this.
     ///
-    /// What it does do is real, though: it records the intention so the app stops nagging
-    /// about having no hub, and it offers the one mechanical step the hub owner does have to
-    /// take, which is making sure every peer it knows is actually being offered the folder.
-    /// Without that, introductions spread device knowledge but nobody receives any builds.
+    /// This replaced a checkbox that claimed to make this machine the hub. That checkbox
+    /// wrote a flag nothing ever read, which is worse than not having it.
     /// </summary>
-    private async void ActAsHub_Click(object sender, RoutedEventArgs e)
+    private async void ShareAll_Click(object sender, RoutedEventArgs e)
     {
-        var wants = ActAsHubCheck.IsChecked == true;
-        ConfigLoader.SetActAsHub(wants);
-
-        if (!wants)
-        {
-            FolderStatus.Text = "No longer advertising this machine as the hub.";
-            return;
-        }
-
-        var share = MessageBox.Show(this,
-            "Recorded. Two things to know.\n\n" +
-            "Syncthing has no flag for being a hub. Each teammate makes you their hub by " +
-            "ticking \"this machine is the team's hub\" when they add you, so hand out your " +
-            "device ID and they do the rest.\n\n" +
-            "The part that is yours to do: every peer you know should be offered the binaries " +
-            "folder, or introductions spread contacts without spreading builds.\n\n" +
-            "Offer the folder to all peers now?",
-            "Acting as the hub", MessageBoxButton.YesNo, MessageBoxImage.Information);
-
-        if (share != MessageBoxResult.Yes) return;
-
         try
         {
+            ShareAllButton.IsEnabled = false;
+
             var peers = await _syncthing.GetPeersAsync(_config.SyncthingFolderId);
-            var added = 0;
-            foreach (var peer in peers.Where(p => !p.SharesOurFolder))
+            var missing = peers.Where(p => !p.SharesOurFolder).ToList();
+
+            if (missing.Count == 0)
             {
-                await _syncthing.ShareFolderWithAsync(_config.SyncthingFolderId, peer.DeviceId);
-                added++;
+                FolderStatus.Text = "Every peer is already being offered the folder.";
+                return;
             }
-            FolderStatus.Text = added == 0
-                ? "Every peer was already offered the folder."
-                : $"Offered the folder to {added} more peer(s).";
+
+            foreach (var peer in missing)
+                await _syncthing.ShareFolderWithAsync(_config.SyncthingFolderId, peer.DeviceId);
+
+            FolderStatus.Text = $"Offered the folder to {missing.Count} more peer(s).";
         }
         catch (Exception ex)
         {
@@ -454,6 +433,7 @@ public partial class PeersWindow : Window
         }
         finally
         {
+            ShareAllButton.IsEnabled = true;
             await RefreshAsync();
         }
     }

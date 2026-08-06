@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Windows;
@@ -18,8 +19,11 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     private readonly AppConfig _config;
     private readonly DvCli _dv;
-    private readonly BuildStore _store;
-    private readonly BinaryInstaller _installer;
+    private readonly SyncthingClient _syncthing = new();
+
+    // Rebuilt when the share moves, which the app follows rather than fights.
+    private BuildStore _store;
+    private BinaryInstaller _installer;
     private readonly LocalBuilder _builder;
     private EngineInfo _engine;
     private readonly IProgress<string> _log;
@@ -174,10 +178,59 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
     // ---------------------------------------------------------------- operations
 
+    /// <summary>
+    /// Follows Syncthing if it is replicating the folder somewhere other than where we are
+    /// reading.
+    ///
+    /// Syncthing is the thing actually moving the bytes, so if the two disagree the app is
+    /// simply wrong, and the symptom is an empty build list that looks exactly like "nobody
+    /// has published anything". This used to be a warning banner telling people to set an
+    /// environment variable, which is a poor thing to ask of a teammate and which they had
+    /// no way to act on.
+    ///
+    /// Config is resolved once when the tab opens, so this has to run on every refresh: a
+    /// folder accepted mid-session, especially through Syncthing's own web UI, would
+    /// otherwise never be noticed.
+    /// </summary>
+    private async Task AdoptSyncthingFolderAsync()
+    {
+        // A deliberate override is left alone. Nothing else here is a real choice.
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("UNHINGEDSYNC_PUBLISH_ROOT")))
+            return;
+
+        string? live;
+        try
+        {
+            // The running daemon first: config.xml can be stale, and a folder accepted a
+            // moment ago in the web UI only exists in the daemon's live configuration.
+            live = await _syncthing.GetFolderPathAsync(_config.SyncthingFolderId)
+                   ?? SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException)
+        {
+            return; // Syncthing unreachable; keep whatever we have.
+        }
+
+        if (ConfigLoader.ResolveAdoption(live, _config.PublishRoot) is not { } resolved) return;
+
+        _log.Report($"Syncthing keeps this project's binaries in {resolved}. Following it.");
+
+        _config.PublishRoot = resolved;
+        ConfigLoader.PersistPublishRoot(resolved);
+
+        // Both of these captured the old path, so they have to be rebuilt rather than
+        // merely re-read.
+        _store = new BuildStore(_config);
+        _installer = new BinaryInstaller(_config);
+
+        OnPropertyChanged(nameof(PublishRootText));
+    }
+
     public async Task RefreshAsync()
     {
         await RunAsync("Refreshing…", async () =>
         {
+            await AdoptSyncthingFolderAsync();
             WorkspaceCommit = await _dv.GetWorkspaceCommitAsync();
             Branch = await _dv.GetBranchAsync();
             var commits = await _dv.GetLogAsync(60);
@@ -522,22 +575,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
             return;
         }
 
-        // Two folders, one of them empty, is otherwise indistinguishable from "nobody has
-        // published anything", and that misreading cost real time once already. Both sides
-        // are normalised first because Syncthing stores the path as typed, including
-        // "~/..." and forward slashes, which would never compare equal raw.
-        var syncthingPath = SyncthingClient.TryGetFolderPathFromConfig(_config.SyncthingFolderId);
-        if (!string.IsNullOrEmpty(syncthingPath) &&
-            !Path.TrimEndingDirectorySeparator(ConfigLoader.NormalisePath(syncthingPath))
-                 .Equals(Path.TrimEndingDirectorySeparator(ConfigLoader.NormalisePath(_config.PublishRoot)),
-                         StringComparison.OrdinalIgnoreCase))
-        {
-            SetStatus(StatusKind.Warning, "This app and Syncthing disagree about where builds live",
-                $"Syncthing replicates {syncthingPath}, but this app is reading " +
-                $"{_config.PublishRoot}. Builds will look missing until they match. Set " +
-                "UNHINGEDSYNC_PUBLISH_ROOT, or re-point the folder in Syncthing.");
-            return;
-        }
+        // No "the two disagree" warning any more. AdoptSyncthingFolderAsync follows
+        // Syncthing on every refresh, so a disagreement resolves itself instead of asking
+        // someone to go and set an environment variable.
 
         if (_installedCommit is null)
         {

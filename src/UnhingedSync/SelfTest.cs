@@ -69,6 +69,38 @@ public static class SelfTest
             Record("paths.normalise", false, e.Message);
         }
 
+        // --- adopting Syncthing's folder ----------------------------------------
+        // The app follows Syncthing rather than warning about a mismatch, so this decision
+        // runs on every refresh. Too eager and it rewrites config constantly; too shy and it
+        // keeps reading an empty folder while Syncthing replicates elsewhere.
+        try
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var checks = new (string Name, string? Live, string Current, bool ExpectAdopt)[]
+            {
+                ("identical",        @"C:\Share",        @"C:\Share",        false),
+                ("trailing slash",   @"C:\Share\",       @"C:\Share",        false),
+                ("case differs",     @"c:\share",        @"C:\Share",        false),
+                ("forward slashes",  "C:/Share",         @"C:\Share",        false),
+                ("tilde expands",    @"~\UnhingedShare", Path.Combine(home, "UnhingedShare"), false),
+                ("genuinely moved",  @"D:\Elsewhere",    @"C:\Share",        true),
+                ("no live folder",   null,               @"C:\Share",        false),
+                ("blank live",       "   ",              @"C:\Share",        false)
+            };
+
+            var wrong = checks
+                .Select(c => new { c.Name, Adopted = ConfigLoader.ResolveAdoption(c.Live, c.Current), c.ExpectAdopt })
+                .Where(r => (r.Adopted is not null) != r.ExpectAdopt)
+                .ToList();
+
+            Record("paths.adoption", wrong.Count == 0,
+                wrong.Count == 0 ? $"{checks.Length} cases correct" : wrong);
+        }
+        catch (Exception e)
+        {
+            Record("paths.adoption", false, e.Message);
+        }
+
         // --- known projects -----------------------------------------------------
         try
         {

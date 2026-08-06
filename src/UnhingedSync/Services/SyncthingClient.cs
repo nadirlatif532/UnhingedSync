@@ -353,6 +353,22 @@ public sealed class SyncthingClient
     }
 
     /// <summary>
+    /// Where the running daemon says this folder lives, or null if it has no such folder.
+    ///
+    /// Preferred over the config.xml reader below, which can be stale: Syncthing 2 keeps
+    /// live configuration in a database beside that file. Asking the daemon is the only way
+    /// to be sure, and it is also the only way to see a folder that was accepted through
+    /// Syncthing's own web UI moments ago.
+    /// </summary>
+    public async Task<string?> GetFolderPathAsync(string folderId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(folderId)) return null;
+        var folder = await TryGetAsync($"config/folders/{folderId}", ct);
+        var path = folder?["path"]?.GetValue<string>();
+        return string.IsNullOrWhiteSpace(path) ? null : path;
+    }
+
+    /// <summary>
     /// The folder's type here: sendreceive, receiveonly, sendonly. Used as a fallback
     /// signal for this machine's role when setup predates the role being recorded --
     /// receive-only is exactly what an artist's machine looks like.
