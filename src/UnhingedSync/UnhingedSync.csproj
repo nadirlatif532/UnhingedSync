@@ -23,7 +23,7 @@
          git tag (see .github/workflows/release.yml), so this value is what local builds
          report; keep it in step with the last tag so a dev build is not mistaken for a
          released one. -->
-    <Version>1.1.0</Version>
+    <Version>1.4.0</Version>
   </PropertyGroup>
 
   <!-- The scripts travel INSIDE the exe. That makes the zip a single file, and makes it
