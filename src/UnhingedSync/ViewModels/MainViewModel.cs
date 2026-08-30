@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
-using System.Text;
 using System.Windows;
 using UnhingedSync.Models;
 using UnhingedSync.Services;
@@ -24,7 +23,23 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly LocalBuilder _builder;
     private EngineInfo _engine;
     private readonly IProgress<string> _log;
-    private readonly StringBuilder _logBuffer = new();
+
+    // Bounded, not a plain StringBuilder: an unbounded engine build can emit tens of
+    // thousands of lines, and re-joining all of them into LogText stays cheap only if
+    // there is a ceiling on how many are kept.
+    private const int MaxLogLines = 4000;
+    private readonly Queue<string> _logLines = new();
+    private DateTime _lastLogFlush = DateTime.MinValue;
+
+    // Rebinding a WPF TextBox's Text on every single line -- which is what a naive
+    // OnPropertyChanged(LogText) per Report() call does -- forces a full re-layout of a
+    // large, non-wrapping, monospace box each time. UnrealBuildTool alone can emit
+    // thousands of lines in a normal build, so that turned "streaming a log" into
+    // thousands of synchronous layout passes on the UI thread: the whole window would
+    // stop responding to clicks or the mouse wheel for the length of the build, which
+    // read as a freeze rather than what it actually was. Flushing at most a few times a
+    // second keeps the log feeling live without starving the UI thread.
+    private static readonly TimeSpan LogFlushInterval = TimeSpan.FromMilliseconds(150);
 
     private string _workspaceCommit = "";
     private string _branch = "";
@@ -51,8 +66,12 @@ public sealed class MainViewModel : INotifyPropertyChanged
 
         _log = new Progress<string>(line =>
         {
-            _logBuffer.AppendLine(line);
-            OnPropertyChanged(nameof(LogText));
+            _logLines.Enqueue(line);
+            while (_logLines.Count > MaxLogLines) _logLines.Dequeue();
+
+            var now = DateTime.UtcNow;
+            if (now - _lastLogFlush < LogFlushInterval) return;
+            FlushLog(now);
         });
 
         SyncAndEnsureCommand = new RelayCommand(SyncAndEnsureAsync, () => !IsBusy);
@@ -157,7 +176,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public string BusyText { get => _busyText; private set => Set(ref _busyText, value); }
-    public string LogText => _logBuffer.ToString();
+    public string LogText => string.Join('\n', _logLines);
+
+    /// <summary>Notifies the UI now rather than waiting for the throttle window to elapse.</summary>
+    private void FlushLog(DateTime? now = null)
+    {
+        _lastLogFlush = now ?? DateTime.UtcNow;
+        OnPropertyChanged(nameof(LogText));
+    }
 
     public CommitRowViewModel? SelectedRow
     {
@@ -662,10 +688,15 @@ public sealed class MainViewModel : INotifyPropertyChanged
         StatusDetail = detail;
     }
 
+    /// <summary>Raised whenever a long-running operation starts, so the view can make sure the
+    /// log is actually on screen instead of scrolled out of sight below the commit list.</summary>
+    public event EventHandler? OperationStarted;
+
     private async Task RunAsync(string busyText, Func<Task> work)
     {
         IsBusy = true;
         BusyText = busyText;
+        OperationStarted?.Invoke(this, EventArgs.Empty);
         try
         {
             await work();
@@ -678,6 +709,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         }
         finally
         {
+            // The throttle window may still be open when the last line is reported, which
+            // would otherwise leave the tail of a build's output invisible until the next
+            // unrelated log line ever arrives -- for a build, that could be never.
+            FlushLog();
             IsBusy = false;
             BusyText = "";
         }
