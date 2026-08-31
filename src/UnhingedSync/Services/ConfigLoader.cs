@@ -281,8 +281,7 @@ public static class ConfigLoader
             lock (GeneratedConfigs) GeneratedConfigs.Add(projectRoot);
         }
 
-        var config = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(sharedPath), Json.Options)
-            ?? throw new InvalidOperationException($"Could not parse {sharedPath}");
+        var config = JsonFile.Deserialize<AppConfig>(sharedPath, Json.Options);
 
         config.ProjectRoot = projectRoot;
         config.EngineDirOverride = GetEngineOverride(projectRoot);

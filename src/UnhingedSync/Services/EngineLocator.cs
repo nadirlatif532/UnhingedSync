@@ -23,17 +23,20 @@ public static class EngineLocator
         return LocateFor(config.ProjectRoot, config.ProjectFile);
     }
 
-    /// <summary>The version the .uproject says this project targets, for comparison.</summary>
+    /// <summary>
+    /// The version the .uproject says this project targets, for comparison. Returns "" when
+    /// it cannot be read: this one is only ever displayed, so it must not throw.
+    /// </summary>
     public static string ReadEngineAssociation(string projectRoot, string projectFile)
     {
         try
         {
-            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(projectRoot, projectFile)));
+            using var doc = JsonFile.Parse(Path.Combine(projectRoot, projectFile));
             return doc.RootElement.TryGetProperty("EngineAssociation", out var assoc)
                 ? assoc.GetString() ?? ""
                 : "";
         }
-        catch (Exception e) when (e is IOException or JsonException)
+        catch (Exception e) when (e is IOException or JsonException or InvalidOperationException)
         {
             return "";
         }
@@ -45,8 +48,10 @@ public static class EngineLocator
     /// </summary>
     public static EngineInfo LocateFor(string projectRoot, string projectFile)
     {
-        var uprojectPath = Path.Combine(projectRoot, projectFile);
-        using var doc = JsonDocument.Parse(File.ReadAllText(uprojectPath));
+        // Named rather than bare: this is a JSON file the user did not write and probably is
+        // not thinking about, so a parse failure here must say ".uproject" out loud or it
+        // gets attributed to the config instead.
+        using var doc = JsonFile.Parse(Path.Combine(projectRoot, projectFile));
         var association = doc.RootElement.TryGetProperty("EngineAssociation", out var assoc)
             ? assoc.GetString() ?? ""
             : "";
@@ -76,8 +81,12 @@ public static class EngineLocator
         {
             if (string.IsNullOrWhiteSpace(dir) || byDirectory.ContainsKey(dir)) return;
             if (!File.Exists(Path.Combine(dir, "Engine", "Build", "Build.version"))) return;
+            // InvalidOperationException included because ReadVersion now reports a malformed
+            // Build.version as one. Enumerating engines must survive a single bad install:
+            // the selector exists precisely so a broken one can be switched away from.
             try { byDirectory[dir] = ReadVersion(dir); }
-            catch (Exception e) when (e is IOException or JsonException or FileNotFoundException) { }
+            catch (Exception e) when (e is IOException or JsonException or FileNotFoundException
+                                          or InvalidOperationException) { }
         }
 
         // Launcher installs, keyed by version string.
@@ -186,7 +195,7 @@ public static class EngineLocator
         if (!File.Exists(versionPath))
             throw new FileNotFoundException($"Engine version file missing: {versionPath}");
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(versionPath));
+        using var doc = JsonFile.Parse(versionPath);
         var root = doc.RootElement;
 
         long Get(string name) => root.TryGetProperty(name, out var v) && v.TryGetInt64(out var l) ? l : 0;
