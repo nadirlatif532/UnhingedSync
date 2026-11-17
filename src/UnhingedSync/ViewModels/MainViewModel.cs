@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -5,6 +6,7 @@ using System.IO;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Threading;
 using UnhingedSync.Models;
 using UnhingedSync.Services;
 
@@ -29,7 +31,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     // there is a ceiling on how many are kept.
     private const int MaxLogLines = 4000;
     private readonly Queue<string> _logLines = new();
-    private DateTime _lastLogFlush = DateTime.MinValue;
+
+    // Lines can arrive from any thread (the build's stdout/stderr handlers run on the
+    // thread pool), so they land here first and only the UI thread moves them into
+    // _logLines. Progress<T> is deliberately not used: it posts one dispatcher callback
+    // per line at Normal priority, which outranks both input and rendering, so a fast
+    // build queued thousands of callbacks ahead of every repaint and click.
+    private readonly ConcurrentQueue<string> _pendingLog = new();
+    private readonly DispatcherTimer _logTimer;
 
     // Rebinding a WPF TextBox's Text on every single line -- which is what a naive
     // OnPropertyChanged(LogText) per Report() call does -- forces a full re-layout of a
@@ -38,8 +47,9 @@ public sealed class MainViewModel : INotifyPropertyChanged
     // thousands of synchronous layout passes on the UI thread: the whole window would
     // stop responding to clicks or the mouse wheel for the length of the build, which
     // read as a freeze rather than what it actually was. Flushing at most a few times a
-    // second keeps the log feeling live without starving the UI thread.
-    private static readonly TimeSpan LogFlushInterval = TimeSpan.FromMilliseconds(150);
+    // second keeps the log feeling live without starving the UI thread. The timer runs at
+    // Background priority so input and rendering always get the UI thread first.
+    private static readonly TimeSpan LogFlushInterval = TimeSpan.FromMilliseconds(200);
 
     private string _workspaceCommit = "";
     private string _branch = "";
@@ -64,15 +74,10 @@ public sealed class MainViewModel : INotifyPropertyChanged
         _installer = new BinaryInstaller(_config);
         _builder = new LocalBuilder(_config);
 
-        _log = new Progress<string>(line =>
-        {
-            _logLines.Enqueue(line);
-            while (_logLines.Count > MaxLogLines) _logLines.Dequeue();
-
-            var now = DateTime.UtcNow;
-            if (now - _lastLogFlush < LogFlushInterval) return;
-            FlushLog(now);
-        });
+        _log = new QueuedLog(_pendingLog);
+        _logTimer = new DispatcherTimer(
+            LogFlushInterval, DispatcherPriority.Background, (_, _) => FlushLog(),
+            Dispatcher.CurrentDispatcher);
 
         SyncAndEnsureCommand = new RelayCommand(SyncAndEnsureAsync, () => !IsBusy);
         RefreshCommand = new RelayCommand(RefreshAsync, () => !IsBusy);
@@ -178,11 +183,29 @@ public sealed class MainViewModel : INotifyPropertyChanged
     public string BusyText { get => _busyText; private set => Set(ref _busyText, value); }
     public string LogText => string.Join('\n', _logLines);
 
-    /// <summary>Notifies the UI now rather than waiting for the throttle window to elapse.</summary>
-    private void FlushLog(DateTime? now = null)
+    /// <summary>
+    /// Moves queued lines into the visible log and notifies the UI, if anything arrived.
+    /// UI thread only. Runs on the timer, and directly when an operation ends so the tail
+    /// of its output never waits for the next tick.
+    /// </summary>
+    private void FlushLog()
     {
-        _lastLogFlush = now ?? DateTime.UtcNow;
+        var any = false;
+        while (_pendingLog.TryDequeue(out var line))
+        {
+            _logLines.Enqueue(line);
+            any = true;
+        }
+        if (!any) return;
+
+        while (_logLines.Count > MaxLogLines) _logLines.Dequeue();
         OnPropertyChanged(nameof(LogText));
+    }
+
+    /// <summary>Thread-safe log sink: enqueues and returns, never touches the UI.</summary>
+    private sealed class QueuedLog(ConcurrentQueue<string> queue) : IProgress<string>
+    {
+        public void Report(string value) => queue.Enqueue(value);
     }
 
     public CommitRowViewModel? SelectedRow

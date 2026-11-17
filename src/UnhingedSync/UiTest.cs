@@ -82,6 +82,21 @@ public static class UiTest
                 Realise(view);
             });
 
+            // A local build streams thousands of lines into the log. If the log box ever
+            // grows to fit them instead of scrolling inside the window, it stops
+            // virtualizing and every update re-lays-out a box tens of thousands of pixels
+            // tall, which froze the whole UI for the length of the build.
+            Check("ProjectView.logStaysBounded", () =>
+            {
+                var view = new ProjectView { DataContext = new MainViewModel(config.ProjectRoot) };
+                view.LogBox.Text = string.Join('\n',
+                    Enumerable.Range(0, 4000).Select(i => $"[{i}/4000] Compile Module.Example.cpp"));
+                Realise(view);
+                if (view.LogBox.ActualHeight > 900)
+                    throw new InvalidOperationException(
+                        $"The log box grew to {view.LogBox.ActualHeight:0}px instead of scrolling.");
+            });
+
             Check("ManageBinariesWindow", () =>
             {
                 var window = new ManageBinariesWindow(config);

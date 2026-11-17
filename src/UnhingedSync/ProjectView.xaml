@@ -3,13 +3,19 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="{StaticResource Bg}">
 
-  <!-- Scrolls when the window is shorter than the content, which only happens once the
-       commit list is dragged tall enough that it and the log's floor height no longer both
-       fit. The commit list defaults to a fixed ~10 rows so both it and the log are visible
-       without any scrolling at the default window size; the log's row is the one that
-       stretches to fill whatever is left over. -->
-  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-  <Grid Margin="16" MinHeight="620">
+  <!-- Scrolls only when the window is shorter than the grid's MinHeight. The commit list
+       defaults to a fixed ~10 rows and the log's row stretches to fill whatever is left.
+
+       The grid's Height is pinned to the viewport on purpose. A ScrollViewer measures its
+       content with infinite height, and under infinite height a "*" row behaves like
+       "Auto", so the log TextBox grew to the full height of every line it held. Its own
+       scrollbar never engaged, ScrollToEnd did nothing, the newest output sat far below
+       the fold, and every flush re-laid-out a box tens of thousands of pixels tall, which
+       is what froze the window during a local build. -->
+  <ScrollViewer x:Name="PageScroll" Padding="16"
+                VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <Grid MinHeight="620"
+        Height="{Binding ViewportHeight, ElementName=PageScroll}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
