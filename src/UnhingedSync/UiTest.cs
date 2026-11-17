@@ -18,6 +18,11 @@ namespace UnhingedSync;
 /// </summary>
 public static class UiTest
 {
+    /// <summary>A line about as long as the ones UnrealBuildTool prints for a plugin compile.</summary>
+    private static string UbtLine(int n) =>
+        $"[{n}] Compile [x64] Module.HoudiniEngineEditor.{n}.cpp  E:/Work/Lahore/Plugins/HoudiniEngine/" +
+        $"Intermediate/Build/Win64/x64/UnrealEditor/Development/HoudiniEngineEditor/File{n}.cpp";
+
     public static async Task<int> RunAsync(string? outputPath)
     {
         outputPath ??= Path.Combine(Path.GetTempPath(), "unhingedsync-uitest.json");
@@ -89,12 +94,42 @@ public static class UiTest
             Check("ProjectView.logStaysBounded", () =>
             {
                 var view = new ProjectView { DataContext = new MainViewModel(config.ProjectRoot) };
-                view.LogBox.Text = string.Join('\n',
-                    Enumerable.Range(0, 4000).Select(i => $"[{i}/4000] Compile Module.Example.cpp"));
+                view.AppendLog(string.Join('\n', Enumerable.Range(0, 4000).Select(UbtLine)));
                 Realise(view);
                 if (view.LogBox.ActualHeight > 900)
                     throw new InvalidOperationException(
                         $"The log box grew to {view.LogBox.ActualHeight:0}px instead of scrolling.");
+            });
+
+            // Each log flush during a build must cost the same however long the log already
+            // is. Re-setting the whole Text measured 0.5-1 s per flush at a few thousand
+            // lines, which kept the UI thread busy and froze the window minutes into a
+            // build; appending measures ~15-20 ms. The limit is far from both.
+            Check("ProjectView.logAppendStaysCheap", () =>
+            {
+                var view = new ProjectView { DataContext = new MainViewModel(config.ProjectRoot) };
+                Realise(view);
+                view.AppendLog(string.Join('\n', Enumerable.Range(0, MainViewModel.MaxLogLines).Select(UbtLine)));
+                view.UpdateLayout();
+
+                const int flushes = 40;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (var f = 0; f < flushes; f++)
+                {
+                    view.AppendLog(string.Join('\n',
+                        Enumerable.Range(10_000 + f * 25, 25).Select(UbtLine)));
+                    view.UpdateLayout();
+                }
+                var perFlush = sw.ElapsedMilliseconds / (double)flushes;
+
+                if (view.LogBox.LineCount > MainViewModel.MaxLogLines)
+                    throw new InvalidOperationException(
+                        $"The log box holds {view.LogBox.LineCount} lines; it should trim to {MainViewModel.MaxLogLines}.");
+                if (!view.LogBox.Text.EndsWith(UbtLine(10_000 + flushes * 25 - 1), StringComparison.Ordinal))
+                    throw new InvalidOperationException("The newest log line is missing from the end of the log box.");
+                if (perFlush > 150)
+                    throw new InvalidOperationException(
+                        $"A log flush took {perFlush:0} ms on a full log; it should stay flat (~20 ms).");
             });
 
             Check("ManageBinariesWindow", () =>

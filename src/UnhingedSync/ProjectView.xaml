@@ -244,13 +244,13 @@
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Text="LOG" Style="{StaticResource Label}"
                    Margin="10,8,10,0" />
-        <TextBox Grid.Row="1" x:Name="LogBox" Text="{Binding LogText, Mode=OneWay}"
+        <!-- Filled from code-behind (AppendLog), never bound: see MainViewModel.LogAppended. -->
+        <TextBox Grid.Row="1" x:Name="LogBox"
                  IsReadOnly="True" Background="Transparent" BorderThickness="0"
                  Foreground="#B9B9C2" FontFamily="Cascadia Mono, Consolas" FontSize="12"
                  TextWrapping="NoWrap" Padding="10,4,10,10"
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                 PreviewMouseWheel="ForwardMouseWheelToParent"
-                 TextChanged="LogBox_TextChanged" />
+                 PreviewMouseWheel="ForwardMouseWheelToParent" />
       </Grid>
     </Border>
   </Grid>

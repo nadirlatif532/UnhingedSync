@@ -12,13 +12,68 @@ public partial class ProjectView : UserControl
     public ProjectView()
     {
         InitializeComponent();
-        Loaded += (_, _) =>
+
+        // DataContextChanged rather than Loaded: Loaded fires again every time the tab is
+        // re-shown, which would subscribe a second, third... handler each time.
+        DataContextChanged += (_, e) =>
         {
-            if (ViewModel is { } vm) vm.OperationStarted += (_, _) => LogSection.BringIntoView();
+            if (e.OldValue is MainViewModel old)
+            {
+                old.LogAppended -= OnLogAppended;
+                old.OperationStarted -= OnOperationStarted;
+            }
+            LogBox.Clear();
+            _logHasText = false;
+            if (e.NewValue is MainViewModel vm)
+            {
+                AppendLog(vm.LogText);
+                vm.LogAppended += OnLogAppended;
+                vm.OperationStarted += OnOperationStarted;
+            }
         };
     }
 
     private MainViewModel? ViewModel => DataContext as MainViewModel;
+
+    private bool _logHasText;
+
+    private void OnOperationStarted(object? sender, EventArgs e) => LogSection.BringIntoView();
+
+    private void OnLogAppended(object? sender, string chunk) => AppendLog(chunk);
+
+    /// <summary>
+    /// Appends lines to the log box and trims the oldest beyond MaxLogLines. Both are
+    /// edits at the ends of the text, which cost the same however long the log is;
+    /// replacing the whole Text instead costs time proportional to its length and froze
+    /// the window during long builds.
+    /// </summary>
+    internal void AppendLog(string chunk)
+    {
+        if (chunk.Length == 0) return;
+
+        // Follow new output only if the reader was already at the bottom, so scrolling
+        // up to read an error is not yanked away by the next line.
+        var follow = LogBox.VerticalOffset + LogBox.ViewportHeight >= LogBox.ExtentHeight - 4;
+
+        // A flag, not LogBox.Text.Length: reading Text copies the whole log into a string.
+        LogBox.AppendText(_logHasText ? "\n" + chunk : chunk);
+        _logHasText = true;
+
+        // Trim in blocks so the cut happens once per few hundred lines, not every flush.
+        var excess = LogBox.LineCount - MainViewModel.MaxLogLines;
+        if (excess > 0)
+        {
+            var cutLine = Math.Min(LogBox.LineCount - 1, excess + MainViewModel.MaxLogLines / 4);
+            var cut = LogBox.GetCharacterIndexFromLineIndex(cutLine);
+            if (cut > 0)
+            {
+                LogBox.Select(0, cut);
+                LogBox.SelectedText = "";
+            }
+        }
+
+        if (follow) LogBox.ScrollToEnd();
+    }
 
     private async void ManageBinaries_Click(object sender, RoutedEventArgs e)
     {
@@ -27,12 +82,6 @@ public partial class ProjectView : UserControl
 
         // Deletions there can change what this project's own list considers expired.
         await ViewModel.RefreshAsync();
-    }
-
-    private void LogBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        // Keep the newest output in view while a long build streams in.
-        if (sender is TextBox box) box.ScrollToEnd();
     }
 
     /// <summary>

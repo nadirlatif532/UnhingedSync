@@ -230,14 +230,21 @@ public sealed class LocalBuilder(AppConfig config)
         var all = new StringBuilder();
         string? resultLine = null;
 
+        // stdout and stderr are read on separate thread-pool threads, so both can call this
+        // at once; StringBuilder is not thread-safe.
+        var gate = new object();
+
         void Handle(string? line)
         {
             if (line is null) return;
-            all.AppendLine(line);
-            if (line.StartsWith(ResultPrefix, StringComparison.Ordinal))
+            lock (gate)
             {
-                resultLine = line[ResultPrefix.Length..];
-                return; // machine-readable, not worth showing
+                all.AppendLine(line);
+                if (line.StartsWith(ResultPrefix, StringComparison.Ordinal))
+                {
+                    resultLine = line[ResultPrefix.Length..];
+                    return; // machine-readable, not worth showing
+                }
             }
             log.Report(line);
         }

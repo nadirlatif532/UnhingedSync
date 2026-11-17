@@ -27,9 +27,8 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly IProgress<string> _log;
 
     // Bounded, not a plain StringBuilder: an unbounded engine build can emit tens of
-    // thousands of lines, and re-joining all of them into LogText stays cheap only if
-    // there is a ceiling on how many are kept.
-    private const int MaxLogLines = 4000;
+    // thousands of lines. The view trims its log box to the same ceiling.
+    public const int MaxLogLines = 4000;
     private readonly Queue<string> _logLines = new();
 
     // Lines can arrive from any thread (the build's stdout/stderr handlers run on the
@@ -40,15 +39,14 @@ public sealed class MainViewModel : INotifyPropertyChanged
     private readonly ConcurrentQueue<string> _pendingLog = new();
     private readonly DispatcherTimer _logTimer;
 
-    // Rebinding a WPF TextBox's Text on every single line -- which is what a naive
-    // OnPropertyChanged(LogText) per Report() call does -- forces a full re-layout of a
-    // large, non-wrapping, monospace box each time. UnrealBuildTool alone can emit
-    // thousands of lines in a normal build, so that turned "streaming a log" into
-    // thousands of synchronous layout passes on the UI thread: the whole window would
-    // stop responding to clicks or the mouse wheel for the length of the build, which
-    // read as a freeze rather than what it actually was. Flushing at most a few times a
-    // second keeps the log feeling live without starving the UI thread. The timer runs at
-    // Background priority so input and rendering always get the UI thread first.
+    // The log is never re-bound as one big string. Replacing a TextBox's whole Text costs
+    // time proportional to everything in it -- measured at 0.5 to 1 s once it holds a
+    // couple of thousand UnrealBuildTool lines -- so re-binding on every flush kept the
+    // UI thread permanently busy and the window froze a few minutes into a build. Instead
+    // each flush hands the view only the new lines (LogAppended), which it appends, at a
+    // cost that stays flat however long the log gets. Flushing a few times a second keeps
+    // the log live; the timer runs at Background priority so input and rendering always
+    // get the UI thread first.
     private static readonly TimeSpan LogFlushInterval = TimeSpan.FromMilliseconds(200);
 
     private string _workspaceCommit = "";
@@ -181,25 +179,33 @@ public sealed class MainViewModel : INotifyPropertyChanged
     }
 
     public string BusyText { get => _busyText; private set => Set(ref _busyText, value); }
+    /// <summary>The retained log as one string. Built on demand; not for binding.</summary>
     public string LogText => string.Join('\n', _logLines);
 
+    /// <summary>Raised on the UI thread with only the lines added since the last flush,
+    /// joined by '\n' with no trailing newline.</summary>
+    public event EventHandler<string>? LogAppended;
+
     /// <summary>
-    /// Moves queued lines into the visible log and notifies the UI, if anything arrived.
-    /// UI thread only. Runs on the timer, and directly when an operation ends so the tail
-    /// of its output never waits for the next tick.
+    /// Moves queued lines into the log and hands just those lines to the view, if anything
+    /// arrived. UI thread only. Runs on the timer, and directly when an operation ends so
+    /// the tail of its output never waits for the next tick.
     /// </summary>
     private void FlushLog()
     {
-        var any = false;
+        List<string>? added = null;
         while (_pendingLog.TryDequeue(out var line))
         {
             _logLines.Enqueue(line);
-            any = true;
+            (added ??= []).Add(line);
         }
-        if (!any) return;
+        if (added is null) return;
 
         while (_logLines.Count > MaxLogLines) _logLines.Dequeue();
-        OnPropertyChanged(nameof(LogText));
+
+        // A huge burst only needs its tail: anything older would be trimmed right away.
+        var visible = added.Count > MaxLogLines ? added.GetRange(added.Count - MaxLogLines, MaxLogLines) : added;
+        LogAppended?.Invoke(this, string.Join('\n', visible));
     }
 
     /// <summary>Thread-safe log sink: enqueues and returns, never touches the UI.</summary>
